@@ -109,6 +109,9 @@ def run(ds: Dataset, cfg: dict) -> dict:
 
         flags = []
         low_markup = markup is not None and markup < eco["min_markup_pct"]
+        no_cost = markup is None and not dead
+        if no_cost:
+            flags.append("нет себестоимости в ERP — наценка неизвестна, проверить до заказа")
         if d["supply_type"] == "unknown":
             flags.append("нет истории поставок — поставщик/плечо не подтверждены")
         if age < fcfg["new_sku_months"] and not dead:
@@ -122,7 +125,9 @@ def run(ds: Dataset, cfg: dict) -> dict:
         out_months = (snap_mi - int(in_stock.max())) if len(in_stock) else None
         if not dead and s0 <= 0 and out_months and out_months >= 3 and not any(t["counted"] for t in transit):
             flags.append(f"нет в наличии {out_months} мес. и нет заказа — подтвердить, что позиция не выведена")
-        if fc.months_censored:
+        if fc.lower_bound and not dead:
+            flags.append("весь последний год товара не было — спрос занижен; если позиция в ассортименте, объём оценить вручную")
+        elif fc.months_censored:
             flags.append(f"{fc.months_censored} мес. дефицита исключены из оценки спроса")
         if pd.isna(d["weight_kg"]):
             flags.append("нет веса — не войдёт в расчёт контейнера")
@@ -170,22 +175,36 @@ def run(ds: Dataset, cfg: dict) -> dict:
             if s0 > 0:
                 explain.append(f"На складе {int(s0)} шт — кандидат на распродажу/списание.")
         else:
+            basis = (f"все {fc.months_used} мес. окна товара не было — спрос оценён по продажам снизу"
+                     if fc.lower_bound else f"оценка по {fc.months_used} мес. с наличием"
+                     + (f", {fc.months_censored} мес. дефицита исключены" if fc.months_censored else ""))
             explain.append(
-                f"Спрос ≈ {fc.level:.0f} шт в средний месяц; сезонный пик — {MONTHS_RU[peak]} "
-                f"(×{idx[peak]:.1f}). Оценка по {fc.months_used} мес."
-                + (f", {fc.months_censored} мес. дефицита исключены." if fc.months_censored else "."))
+                f"Спрос ≈ {fc.level:.1f} шт в средний месяц; сезонный пик — {MONTHS_RU[peak]} "
+                f"(×{idx[peak]:.1f}); {basis}.")
             explain.append(f"Остаток сейчас ≈ {int(s0)} шт; в пути {int(sum(t['qty'] for t in transit if t['counted']))} шт.")
             explain.append(
                 "Запасов хватит до " + (cal.date(cover).strftime("%d.%m.%Y") if cover is not None else "конца горизонта")
                 + ("" if cover is None else f" ({cover} дн.)") + ".")
-            explain.append(f"Плечо {L} дн. ({L_src}, вкл. {cfg['lead_time']['buffer_days']} дн. на таможню); "
-                           f"страховой запас {p['ss']:.0f} шт в средний месяц, по сезону ×0,3–2 (уровень сервиса класса {cls}).")
+            explain.append(f"Плечо {L} дн. ({L_src}, вкл. до {cfg['lead_time']['buffer_days']} дн. запаса на задержку, "
+                           f"не более {cfg['lead_time']['max_days']}); "
+                           f"страховой запас {p['ss']:.0f} шт в средний месяц, по сезону ×0,1–2 (уровень сервиса класса {cls}).")
             if first:
                 a = first["arrival_day"]
                 explain.append(
                     f"Заказ {cal.date(first['order_day']).strftime('%d.%m.%Y')} придёт ≈ {cal.date(a).strftime('%d.%m.%Y')}; "
                     f"спрос на {pol['review_days']} дн. после прихода ≈ {p['demand'][a:a + pol['review_days']].sum():.0f} шт "
                     f"+ страховой − ожидаемый остаток → {first['qty']} шт (с округлением до кратности партии).")
+            if p["deficit"]:
+                dd = p["deficit"]
+                explain.append(
+                    f"Риск: товар закончится {cal.date(dd['stockout_day']).strftime('%d.%m.%Y')}, новый заказ успеет только "
+                    f"≈ {cal.date(dd['stockout_day'] + dd['gap_days']).strftime('%d.%m.%Y')} — потеря ≈ {dd['lost_units']} шт. "
+                    "Закрывать срочной/локальной поставкой или перераспределением.")
+                if status not in ("order_now", "low_markup") and float(np.max(idx)) > 1.5:
+                    explain.append("Морской заказ сегодня пришёл бы уже после пика сезона, поэтому он не рекомендуется — "
+                                   "следующий заказ рассчитан к следующему сезону.")
+            if no_cost:
+                explain.append("Себестоимость в ERP не заведена — наценку не проверить; в плане оставлен, но с пометкой.")
             if low_markup:
                 explain.append(f"Наценка {markup:.0f}% < {eco['min_markup_pct']}% — в автозакупку не идёт, нужен пересмотр цены.")
 
@@ -193,7 +212,7 @@ def run(ds: Dataset, cfg: dict) -> dict:
             "sku": sku, "category": cat, "supplier": sup, "supply_type": d["supply_type"], "brand": d["brand_id"],
             "abc": cls if not dead else "-", "xyz": ("X" if fc.level and fc.sigma / fc.level < 0.5 else
                                                        "Y" if fc.level and fc.sigma / fc.level < 1 else "Z") if fc.level else "-",
-            "status": status, "markup": markup, "price_decile": _r(d["price_decile"]) if pd.notna(d["price_decile"]) else None,
+            "status": status, "markup": markup, "no_cost": bool(no_cost), "price_decile": _r(d["price_decile"]) if pd.notna(d["price_decile"]) else None,
             "weight_kg": w, "units_12m": _r(u12), "last_sale": mi_str(last_sale) if last_sale is not None else None,
             "level": _r(fc.level, 1), "sigma": _r(fc.sigma, 1), "ss": _r(p["ss"]),
             "stock": _r(s0), "transit": transit, "transit_qty": _r(sum(t["qty"] for t in transit if t["counted"])),
@@ -271,15 +290,28 @@ def run(ds: Dataset, cfg: dict) -> dict:
         "excess_units": sum(r["excess"]["excess_units"] for r in excess if r["status"] != "dead"),
         "low_markup_skus": sum(1 for r in rows if r["status"] == "low_markup"),
         "transit_units": sum(r["transit_qty"] or 0 for r in rows),
+        "transit_future_units": int(sum(t["qty"] for r in rows for t in r["transit"] if t["overdue_days"] == 0)),
+        "transit_late_counted_units": int(sum(t["qty"] for r in rows for t in r["transit"] if 0 < t["overdue_days"] and t["counted"])),
+        "transit_stale_units": int(sum(t["qty"] for r in rows for t in r["transit"] if not t["counted"])),
+        "no_cost_skus": sum(1 for r in rows if r.get("no_cost")),
+        "no_cost_order_now": sum(1 for r in rows if r.get("no_cost") and r["status"] == "order_now"),
         "overdue_po": sum(1 for r in rows for t in r["transit"] if t["overdue_days"] > 0),
     }
 
+    active_ids = {r["sku"] for r in active}
+    last12 = full[(full["mi"] >= cutoff - 12) & full["sku_id"].isin(active_ids)]
+    share_out = 100.0 * sum((k, m) in cens for k, m in zip(last12["sku_id"], last12["mi"])) / max(len(last12), 1)
     po_done = ds.po[ds.po["status"] != "open"]
     weird_transit = [r["sku"] for r in rows if r["transit_qty"] and r["level"] is not None
                      and r["transit_qty"] > 24 * max(r["level"], 0.01)]
     dq = [
         {"title": "Вес единицы заполнен", "value": f"{int(dim['weight_kg'].notna().sum())} из {len(dim)} SKU",
          "note": "Контейнеры по весу/объёму не спланировать — нужен справочник веса и м³."},
+        {"title": "Пустая наценка ≠ мёртвый товар",
+         "value": f"{int((dim['avg_markup_pct_12m'].isna() & dim.index.isin([r['sku'] for r in rows if r['status'] != 'dead'])).sum())} SKU",
+         "note": f"В описании выгрузки пустая наценка = нет продаж 12 мес. ({int(dim['avg_markup_pct_12m'].isna().sum())} SKU), "
+                 f"но часть из них продаётся — в ERP просто нет себестоимости. Мёртвыми по факту продаж считаем {len(rows) - len(active)} SKU; "
+                 "продающиеся без себестоимости оставлены в плане с пометкой «наценка неизвестна»."},
         {"title": "Нет поставщика в справочнике", "value": f"{int(dim['supplier_id'].isna().sum())} SKU",
          "note": "Подставлен поставщик из последнего заказа/прихода, где он есть."},
         {"title": "Закрытые PO без единого прихода", "value": f"{int((po_done['qty_received'] == 0).sum())} из {len(po_done)}",
@@ -288,8 +320,8 @@ def run(ds: Dataset, cfg: dict) -> dict:
          "note": f"Старше {pol['overdue_trust_days']} дн. не учитываются в запасе — проверить и закрыть в ERP."},
         {"title": "В пути больше 2 лет спроса", "value": f"{len(weird_transit)} SKU",
          "note": "Проверить привязку заказа к SKU: " + ", ".join(weird_transit[:6]) if weird_transit else "Нет."},
-        {"title": "Месяцы дефицита в истории", "value": f"{len(cens)} SKU×мес",
-         "note": "Исключены из оценки спроса: продажи там занижены отсутствием товара."},
+        {"title": "Месяцы без товара у активных SKU", "value": f"{share_out:.0f}% за 12 мес.",
+         "note": "Товар кончался — продажи там занижены, такие месяцы исключены из оценки спроса."},
     ]
 
     return {

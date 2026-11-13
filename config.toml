@@ -17,7 +17,7 @@ default_local_days = 30
 default_unknown_days = 123
 max_days = 180                # верхняя граница плеча
 min_days = 14
-buffer_days = 14              # растаможка + доставка со склада порта
+buffer_days = 14              # запас на задержку поставки (итог всё равно ≤ max_days)
 
 [policy]
 review_days = 90              # на сколько дней после прихода должен хватить заказ (цикл закупки)

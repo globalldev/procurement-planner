@@ -52,7 +52,9 @@ def build(root: Path) -> Path:
     plan["brief_src"] = brief_src
 
     tpl = (root / "dashboard" / "template.html").read_text(encoding="utf-8")
-    payload = json.dumps(plan, ensure_ascii=False, default=str).replace("</", "<\\/")
+    from .report import clean
+
+    payload = json.dumps(clean(plan), ensure_ascii=False, default=str, allow_nan=False).replace("</", "<\\/")
     html = tpl.replace("/*__DATA__*/null", payload)
     site = root / "docs"  # GitHub Pages раздаёт /docs
     site.mkdir(exist_ok=True)

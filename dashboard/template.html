@@ -184,6 +184,13 @@ footer{color:var(--muted);font-size:12px;margin-top:28px}
     <div id="calList"></div>
   </section>
 
+  <section class="tab" id="t-all">
+    <h2>Все активные товары</h2>
+    <p class="hint">На сколько хватит запасов с учётом заказов в пути, когда следующий заказ и сколько. Клик по строке — расчёт по товару.</p>
+    <div class="filters" id="f-all"></div>
+    <div id="tblAll"></div>
+  </section>
+
   <section class="tab" id="t-risk">
     <h2>Риск дефицита</h2>
     <p class="hint">Запасы закончатся раньше, чем успеет прийти заказ, размещённый сегодня. Морем эти дыры уже не закрыть — нужны срочные/локальные поставки или перераспределение.</p>
@@ -200,6 +207,10 @@ footer{color:var(--muted);font-size:12px;margin-top:28px}
     <p class="hint">Наценка ниже порога — в автозакупку не идут. Решение: поднять цену, сменить поставщика или вывести из ассортимента. Колонка «Заказали бы» — объём при сохранении позиции.</p>
     <div class="filters" id="f-rev"></div>
     <div id="tblRev"></div>
+    <h2 style="margin-top:24px">Нет себестоимости в ERP</h2>
+    <p class="hint">Товар продаётся, но наценку не посчитать: в ERP не заведена себестоимость. В описании выгрузки такие позиции отнесены к «не продававшимся» — это не так, поэтому они оставлены в плане с пометкой. Перед заказом — завести себестоимость и проверить наценку ≥ <span id="mmk"></span>%.</p>
+    <div class="filters" id="f-nc"></div>
+    <div id="tblNc"></div>
     <h2 style="margin-top:24px">Мёртвый ассортимент</h2>
     <p class="hint">Нет продаж 12+ месяцев. Не закупать; остатки — на распродажу или списание.</p>
     <div class="filters" id="f-dead"></div>
@@ -284,9 +295,10 @@ function statusTag(s){
 $('#sub').innerHTML = `Данные на <b>${dt(M.asof)}</b> · выгрузка <code>${esc(M.source)}</code> · расчёт ${M.generated_at.replace('T',' ')} · ${n(K.skus_active)} активных SKU из ${n(K.skus_total)}`;
 $('#winDays').textContent = POL.order_now_window_days;
 $('#excM').textContent = POL.excess_months;
+$('#mmk').textContent = M.params.economics.min_markup_pct;
 const TABS = [
-  ['summary','Обзор'],['now','Заказать сейчас',K.order_now_skus],['cal','Календарь'],
-  ['risk','Риски',K.deficit_critical+K.deficit_high+K.excess_skus],['review','Пересмотр и неликвид',K.low_markup_skus+K.skus_dead],
+  ['summary','Обзор'],['now','Заказать сейчас',K.order_now_skus],['cal','Календарь'],['all','Все товары',K.skus_active],
+  ['risk','Риски',K.deficit_critical+K.deficit_high+K.excess_skus],['review','Пересмотр и неликвид',K.low_markup_skus+K.no_cost_skus+K.skus_dead],
   ['sku','Карточка товара'],['model','Модель и точность']];
 $('#tabs').innerHTML = TABS.map(([id,l,c]) => `<button type="button" data-t="${id}">${l}${c!=null?`<span class="cnt">${n(c)}</span>`:''}</button>`).join('');
 function show(id){
@@ -303,8 +315,8 @@ const KPI = [
   ['cal','var(--serious)','Заказать в ближайшие 60 дн.',n(K.order_soon_skus)+' SKU',`ещё ${n(K.planned_skus)} — позже по календарю`],
   ['risk','var(--critical)','Риск дефицита',n(K.deficit_critical+K.deficit_high)+' SKU',`${n(K.deficit_critical)} критичных · потеря ≈${n(K.deficit_lost_units)} шт`],
   ['risk','var(--warning)','Избыточный запас',n(K.excess_skus)+' SKU',`${n(K.excess_units)} шт сверх ${POL.excess_months} мес. спроса`],
-  ['now','var(--accent)','В пути',n(K.transit_units)+' шт',`${n(K.overdue_po)} просроченных строк PO`],
-  ['review','var(--warning)','Пересмотр цены',n(K.low_markup_skus)+' SKU',`наценка < ${M.params.economics.min_markup_pct}%`],
+  ['now','var(--accent)','В пути (учтено)',n(K.transit_units)+' шт',`${n(K.transit_future_units)} с датой в будущем + ${n(K.transit_late_counted_units)} опаздывают; ${n(K.transit_stale_units)} шт в зависших PO не учтены`],
+  ['review','var(--warning)','Пересмотр цены',n(K.low_markup_skus)+' SKU',`наценка < ${M.params.economics.min_markup_pct}%; ещё ${n(K.no_cost_skus)} без себестоимости`],
   ['review','var(--muted)','Мёртвый ассортимент',n(K.skus_dead)+' SKU',`${n(K.dead_with_stock)} с остатком на складе`],
 ];
 $('#kpis').innerHTML = KPI.map(([t,c,l,v,nt]) => `<div class="card kpi" data-t="${t}" role="button" tabindex="0"><div class="lbl"><span class="dot" style="background:${c}"></span>${l}</div><div class="val">${v}</div><div class="note">${nt}</div></div>`).join('');
@@ -341,12 +353,14 @@ function filters(el, base, onChange, extra=[]){
     ${extra.join('')}
     <button class="btn" type="button" data-f="csv">⬇ CSV</button>`;
   const st = {};
-  const apply = () => onChange(base.filter(r =>
+  let cur = base;
+  const apply = () => onChange(cur = base.filter(r =>
     (!st.q || (r.sku+' '+r.supplier).toLowerCase().includes(st.q.toLowerCase())) &&
     (!st.cat || r.category===st.cat) && (!st.sup || r.supplier===st.sup) && (!st.abc || r.abc===st.abc) &&
-    (!st.sev || (st.sev==='critical' ? r.deficit && r.deficit.severity==='critical' : true))));
+    (!st.sev || (st.sev==='critical' ? r.deficit && r.deficit.severity==='critical' : true)) &&
+    (!st.status || r.status===st.status)));
   el.querySelectorAll('input,select').forEach(i => i.oninput = () => { st[i.dataset.f] = i.value; apply(); });
-  return { apply, csv(fn){ el.querySelector('[data-f=csv]').onclick = fn; } };
+  return { apply, csv(fn){ el.querySelector('[data-f=csv]').onclick = () => fn(cur); } };
 }
 function downloadCsv(name, rows, cols){
   const head = cols.map(c=>c.l).join(';');
@@ -364,6 +378,7 @@ const nowCols = [
   {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)}, {k:'transit_qty',l:'В пути',num:1,h:r=>n(r.transit_qty)},
   {k:'level',l:'Спрос/мес',num:1,h:r=>n(r.level)},
   {k:'stockout_date',l:'Хватит до',v:r=>r.stockout_date||'9999',h:r=>r.stockout_date?dt(r.stockout_date):'> горизонта'},
+  {k:'markup',l:'Наценка, %',num:1,h:r=>r.markup==null?'<span class="sev warn">нет с/с</span>':n1(r.markup)},
   {k:'qty',l:'Заказать, шт',num:1,v:r=>r.orders[0].qty,h:r=>`<b>${n(r.orders[0].qty)}</b>`},
   {k:'arr',l:'Приход ≈',v:r=>r.orders[0].arrival_date,h:r=>dt(r.orders[0].arrival_date)},
   {k:'wt',l:'Вес, кг',num:1,v:r=>r.orders[0].weight_kg,h:r=>n1(r.orders[0].weight_kg)},
@@ -372,7 +387,7 @@ const nowCols = [
 ];
 const tNow = table($('#tblNow'), NOW, nowCols, {sort:'lost'});
 const fNow = filters($('#f-now'), NOW, rs=>tNow.set(rs), [`<select data-f="sev"><option value="">Все</option><option value="critical">Только критичный дефицит</option></select>`]);
-fNow.csv(()=>downloadCsv('zakazat_seychas.csv', NOW, nowCols));
+fNow.csv(rs=>downloadCsv('zakazat_seychas.csv', rs, nowCols));
 
 /* ---------- suppliers ---------- */
 table($('#supTbl'), P.suppliers_now, [
@@ -414,7 +429,23 @@ function renderCal(list){
 }
 renderCal(ORDERS);
 const fCal = filters($('#f-cal'), ORDERS, renderCal);
-fCal.csv(()=>downloadCsv('kalendar_zakazov.csv', ORDERS, [{k:'sku',l:'SKU'},catCol,{k:'supplier',l:'Поставщик'},{k:'order_date',l:'Заказать до'},{k:'arrival_date',l:'Приход'},{k:'qty',l:'Кол-во'},{k:'weight_kg',l:'Вес, кг'}]));
+fCal.csv(rs=>downloadCsv('kalendar_zakazov.csv', rs, [{k:'sku',l:'SKU'},catCol,{k:'supplier',l:'Поставщик'},{k:'order_date',l:'Заказать до'},{k:'arrival_date',l:'Приход'},{k:'qty',l:'Кол-во'},{k:'weight_kg',l:'Вес, кг'}]));
+
+/* ---------- all active ---------- */
+const ALL = P.skus.filter(r=>r.status!=='dead');
+const allCols = [
+  {k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'}, {k:'abc',l:'ABC'},
+  {k:'st',l:'Статус',v:r=>STATUS_RU[r.status],h:r=>statusTag(r.status)},
+  {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)}, {k:'transit_qty',l:'В пути',num:1,h:r=>n(r.transit_qty)},
+  {k:'level',l:'Спрос/мес',num:1,h:r=>n1(r.level)},
+  {k:'cover_days',l:'Хватит, дн.',num:1,v:r=>r.cover_days==null?99999:r.cover_days,h:r=>r.cover_days==null?'> 540':n(r.cover_days)},
+  {k:'stockout_date',l:'Хватит до',v:r=>r.stockout_date||'9999',h:r=>r.stockout_date?dt(r.stockout_date):'> горизонта'},
+  {k:'next',l:'След. заказ',v:r=>r.next_order_date||'9999',h:r=>r.next_order_date?dt(r.next_order_date):'не нужен'},
+  {k:'nq',l:'Объём, шт',num:1,v:r=>r.orders.length?r.orders[0].qty:0,h:r=>r.orders.length?n(r.orders[0].qty):'—'},
+  {k:'def',l:'Риск',v:r=>r.deficit?(r.deficit.severity==='critical'?3:2):r.excess?1:0,h:r=>r.deficit?sev(r.deficit):r.excess?'<span class="sev warn">избыток</span>':'<span class="sev ok">✓ нет</span>'}];
+const tAll = table($('#tblAll'), ALL, allCols, {sort:'cover_days', dir:1});
+const fAll = filters($('#f-all'), ALL, rs=>tAll.set(rs), [`<select data-f="status"><option value="">Все статусы</option>${Object.entries(STATUS_RU).filter(([k])=>k!=='dead').map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>`]);
+fAll.csv(rs=>downloadCsv('vse_tovary.csv', rs, allCols));
 
 /* ---------- risks ---------- */
 const DEF = P.skus.filter(r=>r.deficit && r.status!=='dead');
@@ -427,7 +458,7 @@ const defCols = [
   {k:'lost',l:'Потеря продаж, шт',num:1,v:r=>r.deficit.lost_units,h:r=>`<b>${n(r.deficit.lost_units)}</b>`},
   {k:'st',l:'Статус',v:r=>STATUS_RU[r.status],h:r=>statusTag(r.status)}];
 const tDef = table($('#tblDef'), DEF, defCols, {sort:'lost'});
-const fDef = filters($('#f-def'), DEF, rs=>tDef.set(rs)); fDef.csv(()=>downloadCsv('deficit.csv', DEF, defCols));
+const fDef = filters($('#f-def'), DEF, rs=>tDef.set(rs)); fDef.csv(rs=>downloadCsv('deficit.csv', rs, defCols));
 const EXC = P.skus.filter(r=>r.excess && r.status!=='dead');
 const excCols = [
   {k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'}, {k:'abc',l:'ABC'},
@@ -437,7 +468,7 @@ const excCols = [
   {k:'eu',l:'Избыток, шт',num:1,v:r=>r.excess.excess_units,h:r=>`<b>${n(r.excess.excess_units)}</b>`},
   {k:'st',l:'Статус',v:r=>STATUS_RU[r.status],h:r=>statusTag(r.status)}];
 const tExc = table($('#tblExc'), EXC, excCols, {sort:'eu'});
-const fExc = filters($('#f-exc'), EXC, rs=>tExc.set(rs)); fExc.csv(()=>downloadCsv('izbytok.csv', EXC, excCols));
+const fExc = filters($('#f-exc'), EXC, rs=>tExc.set(rs)); fExc.csv(rs=>downloadCsv('izbytok.csv', rs, excCols));
 
 /* ---------- review / dead ---------- */
 const REV = P.skus.filter(r=>r.status==='low_markup');
@@ -447,12 +478,19 @@ const revCols = [
   {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)}, {k:'stockout_date',l:'Хватит до',v:r=>r.stockout_date||'9999',h:r=>r.stockout_date?dt(r.stockout_date):'> горизонта'},
   {k:'would',l:'Заказали бы, шт',num:1,v:r=>r.orders.length?r.orders[0].qty:0,h:r=>r.orders.length?`${n(r.orders[0].qty)} до ${dt(r.orders[0].order_date)}`:'—'}];
 const tRev = table($('#tblRev'), REV, revCols, {sort:'units_12m'});
-const fRev = filters($('#f-rev'), REV, rs=>tRev.set(rs)); fRev.csv(()=>downloadCsv('peresmotr_ceny.csv', REV, revCols));
+const fRev = filters($('#f-rev'), REV, rs=>tRev.set(rs)); fRev.csv(rs=>downloadCsv('peresmotr_ceny.csv', rs, revCols));
 const DEAD = P.skus.filter(r=>r.status==='dead');
 const deadCols = [{k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'},
   {k:'last_sale',l:'Последняя продажа',h:r=>r.last_sale?dt(r.last_sale):'нет'}, {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)}];
 const tDead = table($('#tblDead'), DEAD, deadCols, {sort:'stock'});
-const fDead = filters($('#f-dead'), DEAD, rs=>tDead.set(rs)); fDead.csv(()=>downloadCsv('mertvyi_assortiment.csv', DEAD, deadCols));
+const fDead = filters($('#f-dead'), DEAD, rs=>tDead.set(rs)); fDead.csv(rs=>downloadCsv('mertvyi_assortiment.csv', rs, deadCols));
+const NOCOST = P.skus.filter(r=>r.no_cost);
+const ncCols = [{k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'}, {k:'abc',l:'ABC'},
+  {k:'units_12m',l:'Продано за 12 мес',num:1,h:r=>n(r.units_12m)}, {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)},
+  {k:'st',l:'Статус в плане',v:r=>STATUS_RU[r.status],h:r=>statusTag(r.status)},
+  {k:'q',l:'Следующий заказ',v:r=>r.orders.length?r.orders[0].order_date:'9999',h:r=>r.orders.length?`${n(r.orders[0].qty)} шт до ${dt(r.orders[0].order_date)}`:'—'}];
+const tNc = table($('#tblNc'), NOCOST, ncCols, {sort:'units_12m'});
+const fNc = filters($('#f-nc'), NOCOST, rs=>tNc.set(rs)); fNc.csv(rs=>downloadCsv('net_sebestoimosti.csv', rs, ncCols));
 
 /* ---------- charts ---------- */
 const charts = {};
@@ -508,16 +546,18 @@ function openSku(id){
   try{ history.replaceState(null,'','#sku='+id); }catch(e){}
   const tr = r.transit.map(t=>`${n(t.qty)} шт — ${dt(t.promised)}${t.overdue_days?` (просрочен ${t.overdue_days} дн.${t.counted?'':', не учтён'})`:''}`).join('<br>') || 'нет';
   $('#skuCard').innerHTML = `<div class="card">
-    <div class="sku-head"><span class="id">${r.sku}</span>${statusTag(r.status)}<span class="tag">${CAT_RU[r.category]}</span><span class="tag">${r.supplier}</span><span class="tag">ABC ${r.abc} · XYZ ${r.xyz}</span>${r.markup!=null?`<span class="tag">наценка ${n1(r.markup)}%</span>`:''}</div>
+    <div class="sku-head"><span class="id">${r.sku}</span>${statusTag(r.status)}<span class="tag">${CAT_RU[r.category]}</span><span class="tag">${r.supplier}</span><span class="tag">ABC ${r.abc} · XYZ ${r.xyz}</span>${r.markup!=null?`<span class="tag">наценка ${n1(r.markup)}%</span>`:'<span class="sev warn">нет себестоимости</span>'}</div>
     <div class="facts">
       <div class="fact"><div class="k">Остаток сейчас</div><div class="v">${n(r.stock)}</div></div>
       <div class="fact"><div class="k">В пути</div><div class="v">${n(r.transit_qty)}</div></div>
       <div class="fact"><div class="k">Спрос, ср. месяц</div><div class="v">${n1(r.level)}</div></div>
-      <div class="fact"><div class="k">Хватит до</div><div class="v">${r.stockout_date?dt(r.stockout_date):'> 18 мес'}</div></div>
+      <div class="fact"><div class="k">Хватит до (с учётом в пути)</div><div class="v">${r.stockout_date?dt(r.stockout_date):'> 18 мес'}</div></div>
+      <div class="fact"><div class="k">Без заказов в пути</div><div class="v">${r.cover_days_no_transit==null?'> 18 мес':r.cover_days_no_transit+' дн.'}</div></div>
       <div class="fact"><div class="k">Плечо поставки</div><div class="v">${r.lead_days} дн.</div></div>
       <div class="fact"><div class="k">Страховой запас</div><div class="v">${n(r.ss)}</div></div>
       <div class="fact"><div class="k">Следующий заказ</div><div class="v">${r.orders.length?dt(r.orders[0].order_date):'не нужен'}</div></div>
       <div class="fact"><div class="k">Объём</div><div class="v">${r.orders.length?n(r.orders[0].qty)+' шт':'—'}</div></div>
+      <div class="fact"><div class="k">Риск</div><div class="v" style="font-size:14px">${r.deficit?sev(r.deficit)+` <span style="font-weight:500">−${n(r.deficit.lost_units)} шт</span>`:r.excess?`<span class="sev warn">избыток ${n(r.excess.excess_units)} шт</span>`:'<span class="sev ok">✓ нет</span>'}</div></div>
     </div>
     <div class="grid two">
       <div><h3>Спрос: факт и прогноз, шт/мес</h3><div class="legend" id="skuL1"></div><div class="chart-box sm"><canvas id="skuChart1"></canvas></div></div>
@@ -557,9 +597,9 @@ function drawSku(r){
   <p><b>1. Спрос, а не продажи.</b> Для каждого месяца проверяем, был ли товар в наличии (остаток на 1-е + приходы − продажи). Месяцы, когда товар кончился, не используются для оценки: там продажи занижены. Разовые оптовые отгрузки выше ${p.forecast.outlier_k}× ожидаемого срезаются.</p>
   <p><b>2. Прогноз = уровень × сезонность.</b> Сезонный профиль — по ${''}полным годам истории категории, уточнённый собственной историей SKU. Уровень — взвешенное среднее за ${p.forecast.history_months} мес. (вес свежих месяцев выше, полупериод ${p.forecast.half_life_months} мес.).</p>
   <p><b>3. Проекция остатков по дням</b> на ${Math.round(p.policy.horizon_days/30)} мес.: остаток сейчас (снимок на 1-е − продажи + приходы) плюс открытые заказы с датой прихода. Просроченные PO до ${p.policy.overdue_trust_days} дн. считаем едущими, старше — не учитываем и показываем к проверке.</p>
-  <p><b>4. Когда заказывать:</b> день, когда остаток опустится ниже страхового запаса, минус плечо поставки (медиана плановых сроков PO поставщика за 2 года → история SKU → норматив; не более ${p.lead_time.max_days} дн. + ${p.lead_time.buffer_days} дн. на таможню). Если эта дата ближе ${p.policy.order_now_window_days} дн. — «заказать сейчас».</p>
+  <p><b>4. Когда заказывать:</b> день, когда остаток опустится ниже страхового запаса, минус плечо поставки (медиана плановых сроков PO поставщика за 2 года → история SKU → норматив; + до ${p.lead_time.buffer_days} дн. запаса на задержку, итого не более ${p.lead_time.max_days} дн.). Если эта дата ближе ${p.policy.order_now_window_days} дн. — «заказать сейчас».</p>
   <p><b>5. Сколько:</b> прогноз спроса на ${p.policy.review_days} дн. после прихода + страховой запас − ожидаемый остаток на дату прихода − что ещё приедет; округление вверх до кратности партии из истории заказов. Страховой запас: z(уровень сервиса A ${p.policy.service_level_A*100}% / B ${p.policy.service_level_B*100}% / C ${p.policy.service_level_C*100}%) × σ × √плечо, не более ${p.policy.max_safety_months} мес. спроса.</p>
-  <p><b>6. Отсечения:</b> наценка ниже ${p.economics.min_markup_pct}% — в список на пересмотр цены, не в закупку; нет продаж ${p.economics.dead_months}+ мес. — мёртвый ассортимент; запас больше ${p.policy.excess_months} мес. — избыток.</p>
+  <p><b>6. Отсечения:</b> наценка ниже ${p.economics.min_markup_pct}% — в список на пересмотр цены, не в закупку; нет себестоимости в ERP — в плане, но с пометкой «проверить наценку»; нет продаж ${p.economics.dead_months}+ мес. — мёртвый ассортимент; запас больше ${p.policy.excess_months} мес. — избыток.</p>
   <p class="hint">Все параметры — в <code>config.toml</code>; расчёт детерминированный (Python), ИИ-агент запускает его, проверяет аномалии и пишет сводку.</p>`;
 })();
 

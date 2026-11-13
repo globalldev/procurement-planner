@@ -78,7 +78,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="planner")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="пересчитать план закупок и собрать дашборд")
-    r.add_argument("--asof", help="дата среза YYYY-MM-DD (по умолчанию из config)")
+    r.add_argument("--asof", help="дата среза YYYY-MM-DD, если её нет в имени выгрузки (данные не обрезаются)")
     r.add_argument("--config", type=Path)
     r.add_argument("--no-backtest", action="store_true")
     r.set_defaults(fn=cmd_run)

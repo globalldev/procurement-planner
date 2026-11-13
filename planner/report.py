@@ -7,10 +7,28 @@ from pathlib import Path
 
 import pandas as pd
 
+CAT_RU = {
+    "sanitary_faucets": "Смесители", "trimmer_blades_accessories": "Лески и ножи", "string_trimmers": "Триммеры",
+    "grain_mills": "Зернодробилки", "concrete_mixers": "Бетономешалки", "space_heaters": "Обогреватели",
+}
+SEV_RU = {"critical": "критично", "high": "высокий"}
+
 STATUS_RU = {
     "order_now": "Заказать сейчас", "order_soon": "Заказать ≤60 дн.", "planned": "Запланирован",
     "ok": "Запаса хватает", "low_markup": "Пересмотр цены", "dead": "Мёртвый ассортимент",
 }
+
+
+def clean(o):
+    """NaN/inf → null: JSON.parse в браузере падает на NaN."""
+    import math
+    if isinstance(o, float):
+        return None if not math.isfinite(o) else o
+    if isinstance(o, dict):
+        return {k: clean(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [clean(v) for v in o]
+    return o
 
 
 def _snapshot(result: dict) -> dict:
@@ -51,36 +69,42 @@ def _xlsx(result: dict, path: Path) -> None:
     rows = result["skus"]
 
     def base(r):
-        return {"SKU": r["sku"], "Категория": r["category"], "Поставщик": r["supplier"], "ABC": r["abc"], "XYZ": r["xyz"],
+        return {"SKU": r["sku"], "Категория": CAT_RU.get(r["category"], r["category"]), "Поставщик": r["supplier"], "ABC": r["abc"], "XYZ": r["xyz"],
                 "Статус": STATUS_RU[r["status"]], "Остаток": r["stock"], "В пути": r["transit_qty"],
                 "Спрос/мес (ср.)": r["level"], "Хватит до": r["stockout_date"] or "—", "Дней покрытия": r["cover_days"],
-                "Плечо, дн": r["lead_days"], "Страховой": r["ss"], "Наценка %": r["markup"]}
+                "Плечо, дн": r["lead_days"], "Страховой": r["ss"],
+                "Наценка %": r["markup"] if r["markup"] is not None else "нет себестоимости"}
 
     order_now = [{**base(r), "Заказать, шт": r["orders"][0]["qty"], "Кратность": r["pack"],
                   "Приход ≈": r["orders"][0]["arrival_date"], "Вес, кг": r["orders"][0]["weight_kg"],
-                  "Риск дефицита": (r["deficit"] or {}).get("severity", ""), "Почему": " ".join(r["explain"])}
+                  "Риск дефицита": SEV_RU.get((r["deficit"] or {}).get("severity"), "нет"), "Почему": " ".join(r["explain"])}
                  for r in rows if r["status"] == "order_now"]
-    cal = [{"SKU": r["sku"], "Категория": r["category"], "Поставщик": r["supplier"], "Дата заказа": o["order_date"],
+    cal = [{"SKU": r["sku"], "Категория": CAT_RU.get(r["category"], r["category"]), "Поставщик": r["supplier"], "Дата заказа": o["order_date"],
             "Приход ≈": o["arrival_date"], "Кол-во": o["qty"], "Вес, кг": o["weight_kg"]}
            for r in rows if r["status"] not in ("dead", "low_markup") for o in r["orders"]]
     deficit = [{**base(r), "Дефицит с": r["deficit"]["stockout_date"], "Дней без товара": r["deficit"]["gap_days"],
-                "Потеря продаж, шт": r["deficit"]["lost_units"], "Уровень": r["deficit"]["severity"]}
+                "Потеря продаж, шт": r["deficit"]["lost_units"], "Уровень": SEV_RU[r["deficit"]["severity"]]}
                for r in rows if r["deficit"]]
     excess = [{**base(r), "Избыток, шт": r["excess"]["excess_units"], "Запас, мес": r["excess"]["months"]}
-              for r in rows if r["excess"]]
+              for r in rows if r["excess"] and r["status"] != "dead"]
     review = [{**base(r), "Заказали бы, шт": r["orders"][0]["qty"] if r["orders"] else 0}
               for r in rows if r["status"] == "low_markup"]
-    dead = [{"SKU": r["sku"], "Категория": r["category"], "Последняя продажа": r["last_sale"], "Остаток": r["stock"]}
+    no_cost = [{**base(r), "След. заказ": r["next_order_date"] or "—",
+                "Объём": r["orders"][0]["qty"] if r["orders"] else 0} for r in rows if r.get("no_cost")]
+    dead = [{"SKU": r["sku"], "Категория": CAT_RU.get(r["category"], r["category"]), "Последняя продажа": r["last_sale"], "Остаток": r["stock"]}
             for r in rows if r["status"] == "dead"]
     allr = [{**base(r), "След. заказ": r["next_order_date"] or "—", "Флаги": "; ".join(r["flags"])} for r in rows]
 
+    sup_rows = [{"Поставщик": s["supplier"], "SKU к заказу": s["skus"], "Штук": s["units"],
+                 "Исполнение PO по ERP, %": s["fill_rate"],
+                 "Категории": ", ".join(CAT_RU.get(c, c) for c in s["categories"])} for s in result["suppliers_now"]]
+
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         for name, data in [("Заказать сейчас", order_now), ("Календарь заказов", cal), ("Риск дефицита", deficit),
-                           ("Избыток", excess), ("Пересмотр цены", review), ("Мёртвый ассортимент", dead),
-                           ("Поставщики", result["suppliers_now"]), ("Все SKU", allr)]:
+                           ("Избыток", excess), ("Пересмотр цены", review), ("Нет себестоимости", no_cost),
+                           ("Мёртвый ассортимент", dead),
+                           ("Поставщики", sup_rows), ("Все SKU", allr)]:
             df = pd.DataFrame(data)
-            if name == "Поставщики" and len(df):
-                df["categories"] = df["categories"].map(", ".join)
             df.to_excel(xw, sheet_name=name, index=False)
             ws = xw.sheets[name]
             ws.freeze_panes = "A2"
@@ -154,9 +178,10 @@ def write_all(result: dict, root: Path, cfg: dict) -> dict:
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     (hist / f"{stamp}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
-    (out / "plan.json").write_text(json.dumps(result, ensure_ascii=False, default=str), encoding="utf-8")
-    (out / "ai_context.json").write_text(json.dumps(ai_summary(result, d), ensure_ascii=False, indent=1, default=str),
-                                         encoding="utf-8")
+    result = clean(result)
+    (out / "plan.json").write_text(json.dumps(result, ensure_ascii=False, default=str, allow_nan=False), encoding="utf-8")
+    (out / "ai_context.json").write_text(json.dumps(clean(ai_summary(result, d)), ensure_ascii=False, indent=1,
+                                                    default=str, allow_nan=False), encoding="utf-8")
     brief_path = out / "ai_brief.md"
     # сводка детерминированная по умолчанию; ИИ-версию пишет `python -m planner brief`
     (out / "brief_fallback.md").write_text(fallback_brief(result, d), encoding="utf-8")

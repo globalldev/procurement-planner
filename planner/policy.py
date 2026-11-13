@@ -106,8 +106,9 @@ def lead_days(sku: str, supplier: str, supply_type: str, po: pd.DataFrame, sup: 
         base = {"import": lt["default_import_days"], "local": lt["default_local_days"]}.get(
             supply_type, lt["default_unknown_days"])
         src = "норматив по типу поставки"
-    base = min(max(base, lt["min_days"]), lt["max_days"])
-    return int(round(base + lt["buffer_days"])), src
+    # запас на задержку поставки, но итог не выше верхней границы плеча (180 дн. по условию)
+    total = min(max(base, lt["min_days"]) + lt["buffer_days"], lt["max_days"])
+    return int(round(total)), src
 
 
 def z_for(abc: str, cfg: dict) -> float:
@@ -132,7 +133,7 @@ def plan_sku(
     ss = z_for(abc, cfg) * fc.sigma * np.sqrt(L / 30.0)
     ss = float(min(ss, pol["max_safety_months"] * fc.level)) if fc.level > 0 else 0.0
     # страховой запас дышит вместе с сезоном: в пик больше, в межсезонье меньше
-    ss_day = np.minimum(ss * np.clip(fc.idx[cal.day_mi % 12], 0.3, 2.0), pol["max_safety_months"] * fc.level)
+    ss_day = np.minimum(ss * np.clip(fc.idx[cal.day_mi % 12], 0.1, 2.0), pol["max_safety_months"] * fc.level)
 
     inv_base, lost_base = project(stock0, demand, arrivals)
     inv_nt, _ = project(stock0, demand, np.zeros(H))
@@ -225,7 +226,7 @@ def stock_now(sku_sales: pd.DataFrame, sku_stock: pd.DataFrame, sku_rcpt: pd.Dat
     base = float(snap.iat[0]) if len(snap) else 0.0
     sold = float(sku_sales.loc[sku_sales["mi"] >= snap_mi, "y"].sum())
     y, m = divmod(snap_mi, 12)
-    got = float(sku_rcpt.loc[sku_rcpt["receipt_date"] >= pd.Timestamp(y, m + 1, 1), "qty"].sum())
+    got = float(sku_rcpt.loc[sku_rcpt["receipt_date"] >= pd.Timestamp(y, m + 1, 1), "qty"].sum())  # приходы с 1-го числа
     return max(base - sold + got, 0.0)
 
 

@@ -87,7 +87,8 @@ def censored_months(stock: pd.DataFrame, sales: pd.DataFrame, receipts: pd.DataF
     sub = sales[sales["mi"] >= first_snap]
     for sku, m, y in zip(sub["sku_id"], sub["mi"], sub["qty_sold"]):
         avail = st.get((sku, m), 0) + rc.get((sku, m), 0)
-        if avail - y <= max(1.0, 0.05 * avail):
+        # товара не было вовсе или к концу месяца продано ≥95% доступного
+        if avail <= 0 or avail - y <= 0.05 * avail:
             out.add((sku, m))
     return out
 
@@ -100,6 +101,7 @@ class SkuForecast:
     months_used: int
     months_censored: int
     history_months: int
+    lower_bound: bool = False  # все месяцы окна в дефиците: спрос оценён по продажам снизу
 
     def month(self, m: int) -> float:
         return self.level * self.idx[m % 12]
@@ -114,8 +116,9 @@ def fit_sku(g: pd.DataFrame, idx: np.ndarray, cutoff: int, censored: set, sku: s
     cmask = np.array([(sku, m) in censored for m in win_all["mi"]], dtype=bool)
     n_cens = int(cmask.sum())
     win = win_all[~cmask]
+    lower = False
     if win.empty and len(win_all):
-        win = win_all          # всё окно в дефиците: берём продажи как нижнюю оценку
+        win, lower = win_all, True   # всё окно в дефиците: берём продажи как нижнюю оценку
     if win.empty:
         return SkuForecast(0.0, 0.0, idx, 0, n_cens, hist_months)
     # месяцы дефицита, где продали больше текущей оценки, тоже информативны — добавим их
@@ -158,10 +161,14 @@ def fit_sku(g: pd.DataFrame, idx: np.ndarray, cutoff: int, censored: set, sku: s
     w24 = g[g["mi"] >= cutoff - 24]
     w24 = w24[[(sku, m) not in censored for m in w24["mi"]]]
     # разброс считаем в «очищенном от сезона» масштабе: сезонность потом добавится один раз, в политике
-    si = np.maximum(idx[w24["mi"].to_numpy() % 12], 0.3)
-    resid = w24["y"].to_numpy() / si - level
+    # для сезонных товаров берём только сезонные месяцы: нули межсезонья не «разброс», а форма спроса
+    s24 = idx[w24["mi"].to_numpy() % 12]
+    season_mask = s24 >= 0.5
+    if season_mask.sum() >= 4:
+        w24, s24 = w24[season_mask], s24[season_mask]
+    resid = w24["y"].to_numpy() / np.maximum(s24, 0.3) - level
     sigma = float(np.std(resid, ddof=1)) if len(resid) >= 4 else float(np.sqrt(max(level, 0)))
-    return SkuForecast(level, sigma, idx, len(win), n_cens, hist_months)
+    return SkuForecast(level, sigma, idx, len(win), n_cens, hist_months, lower)
 
 
 def prepare_sales(sales: pd.DataFrame) -> pd.DataFrame:
