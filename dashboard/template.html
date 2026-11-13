@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>План закупок</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{
+  color-scheme: light;
+  --bg:#f6f5f2; --surface:#fcfcfb; --surface-2:#f0efec; --border:#e2e0da;
+  --text:#0b0b0b; --text-2:#52514e; --muted:#7a7873;
+  --accent:#2a78d6; --accent-soft:#e3eefb;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#6250d6; --s8:#e34948;
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --crit-bg:#fbe9e9; --high-bg:#fdf0e8; --ok-bg:#e8f5e8; --warn-bg:#fff6e0;
+  --grid:#e9e7e2;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#121211; --surface:#1a1a19; --surface-2:#242422; --border:#33332f;
+    --text:#f0efec; --text-2:#c3c2b7; --muted:#8f8d86;
+    --accent:#3987e5; --accent-soft:#1d2b3d;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+    --crit-bg:#3a1d1d; --high-bg:#3a2a1f; --ok-bg:#1c2e1c; --warn-bg:#352c14;
+    --grid:#2c2c29;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#121211; --surface:#1a1a19; --surface-2:#242422; --border:#33332f;
+  --text:#f0efec; --text-2:#c3c2b7; --muted:#8f8d86;
+  --accent:#3987e5; --accent-soft:#1d2b3d;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --crit-bg:#3a1d1d; --high-bg:#3a2a1f; --ok-bg:#1c2e1c; --warn-bg:#352c14;
+  --grid:#2c2c29;
+}
+*{box-sizing:border-box}
+html,body{margin:0;overflow-x:hidden}
+body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1360px;margin:0 auto;padding:20px 16px 60px}
+header.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between;margin-bottom:16px}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--text-2);font-size:13px;margin-top:4px;overflow-wrap:anywhere}
+header.top>div{min-width:0}
+.wrap>*{min-width:0}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;padding:7px 12px;font:inherit;font-size:13px;cursor:pointer;text-decoration:none;display:inline-flex;gap:6px;align-items:center}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+nav.tabs{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid var(--border);margin-bottom:18px;scrollbar-width:none}
+nav.tabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--text-2);font:inherit;font-weight:500;padding:10px 14px;cursor:pointer;white-space:nowrap}
+nav.tabs button.on{color:var(--text);border-bottom-color:var(--accent)}
+nav.tabs .cnt{font-size:11px;background:var(--surface-2);border-radius:10px;padding:1px 7px;margin-left:6px;color:var(--text-2)}
+section.tab{display:none}
+section.tab.on{display:block}
+.grid{display:grid;gap:12px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-bottom:16px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;min-width:0}
+.kpi{cursor:pointer;transition:border-color .15s}
+.kpi:hover{border-color:var(--accent)}
+.kpi .lbl{color:var(--text-2);font-size:12.5px;display:flex;gap:6px;align-items:center}
+.kpi .val{font-size:28px;font-weight:650;letter-spacing:-.02em;margin:6px 0 2px;font-variant-numeric:tabular-nums}
+.kpi .note{color:var(--muted);font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.two{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}
+@media (max-width:900px){.two{grid-template-columns:minmax(0,1fr)}}
+h2{font-size:16px;margin:0 0 4px}
+h3{font-size:14px;margin:18px 0 8px}
+.hint{color:var(--text-2);font-size:12.5px;margin:0 0 12px}
+.brief p{margin:0 0 10px}
+.brief ul{margin:0 0 10px;padding-left:20px}
+.brief li{margin:3px 0}
+.brief h4{margin:12px 0 6px;font-size:14px}
+.tag{font-size:11px;border-radius:6px;padding:2px 7px;background:var(--surface-2);color:var(--text-2);white-space:nowrap}
+.chart-box{position:relative;height:280px}
+.chart-box.sm{height:220px}
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center}
+.filters input,.filters select{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px;min-width:0}
+.filters input{flex:1 1 200px;max-width:320px}
+.tbl-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px;background:var(--surface);max-height:640px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--surface-2);font-weight:600;color:var(--text-2);font-size:12px;cursor:pointer;user-select:none;z-index:1}
+th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
+th .arr{opacity:.5;font-size:10px}
+tbody tr{cursor:pointer}
+tbody tr:hover td{background:var(--accent-soft)}
+td.wrap{white-space:normal;min-width:260px;color:var(--text-2)}
+.sev{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.sev.critical{background:var(--crit-bg);color:var(--critical)}
+.sev.high{background:var(--high-bg);color:var(--serious)}
+.sev.ok{background:var(--ok-bg);color:var(--good)}
+.sev.warn{background:var(--warn-bg);color:#a87400}
+:root[data-theme="dark"] .sev.warn{color:var(--warning)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .sev.warn{color:var(--warning)}}
+.empty{color:var(--muted);padding:24px;text-align:center}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--text-2);margin:4px 0 8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.sku-head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;margin-bottom:10px}
+.sku-head .id{font-size:20px;font-weight:650}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:10px 0 14px}
+.fact{background:var(--surface-2);border-radius:8px;padding:8px 10px}
+.fact .k{font-size:11.5px;color:var(--text-2)}
+.fact .v{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+ol.explain{margin:0;padding-left:20px;color:var(--text)}
+ol.explain li{margin:4px 0}
+ul.flags{margin:6px 0 0;padding-left:18px;color:var(--text-2)}
+.diff-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.diff-list .card{padding:12px}
+.diff-list b{font-size:20px}
+.month-block{margin-bottom:14px}
+.month-block summary{cursor:pointer;font-weight:600;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;list-style:none;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.month-block[open] summary{border-radius:10px 10px 0 0}
+.month-block .tbl-wrap{border-radius:0 0 10px 10px;border-top:0;max-height:none}
+code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12px}
+.method p{margin:0 0 8px}
+footer{color:var(--muted);font-size:12px;margin-top:28px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>План закупок</h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <div class="toolbar">
+      <a class="btn" href="plan.xlsx" download>⬇ Excel для закупщика</a>
+      <button class="btn" id="themeBtn" type="button">◐ Тема</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+
+  <section class="tab" id="t-summary">
+    <div class="grid kpis" id="kpis"></div>
+    <div class="grid two">
+      <div class="card">
+        <h2>Сводка для закупщика</h2>
+        <p class="hint" id="briefSrc"></p>
+        <div class="brief" id="brief"></div>
+      </div>
+      <div class="card">
+        <h2>Календарь заказов на 12 месяцев</h2>
+        <p class="hint">Сколько штук нужно заказать в каждом месяце, по категориям. Август — то, что надо разместить сейчас.</p>
+        <div class="legend" id="calLegend"></div>
+        <div class="chart-box"><canvas id="calChart" aria-label="Календарь заказов по месяцам"></canvas></div>
+      </div>
+    </div>
+    <div class="grid two" style="margin-top:12px">
+      <div class="card">
+        <h2>Заказы сейчас — по поставщикам</h2>
+        <p class="hint">Один поставщик — один заказ. «Исполнение PO» — по данным заказов в ERP; часть приходов к PO не привязана, поэтому цифра занижена (см. «Качество данных»).</p>
+        <div id="supTbl"></div>
+      </div>
+      <div class="grid" style="gap:12px">
+        <div class="card">
+          <h2>Что изменилось с прошлого запуска</h2>
+          <div id="diff"></div>
+        </div>
+        <div class="card">
+          <h2>Качество данных</h2>
+          <p class="hint">Что в выгрузке мешает планированию и как система это обходит.</p>
+          <div id="dq"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab" id="t-now">
+    <h2>Заказать сейчас</h2>
+    <p class="hint">Крайняя дата заказа уже наступила или наступит в ближайшие <span id="winDays"></span> дн. Клик по строке — расчёт по товару.</p>
+    <div class="filters" id="f-now"></div>
+    <div id="tblNow"></div>
+  </section>
+
+  <section class="tab" id="t-cal">
+    <h2>Календарь закупок</h2>
+    <p class="hint">Когда разместить каждый следующий заказ, чтобы не уйти в дефицит, и сколько заказать. Учтены остатки, заказы в пути и сезонность.</p>
+    <div class="filters" id="f-cal"></div>
+    <div id="calList"></div>
+  </section>
+
+  <section class="tab" id="t-risk">
+    <h2>Риск дефицита</h2>
+    <p class="hint">Запасы закончатся раньше, чем успеет прийти заказ, размещённый сегодня. Морем эти дыры уже не закрыть — нужны срочные/локальные поставки или перераспределение.</p>
+    <div class="filters" id="f-def"></div>
+    <div id="tblDef"></div>
+    <h2 style="margin-top:24px">Избыточный запас</h2>
+    <p class="hint">Остаток + в пути больше спроса на <span id="excM"></span> мес. вперёд. Новые заказы не нужны; кандидаты на акции и перераспределение.</p>
+    <div class="filters" id="f-exc"></div>
+    <div id="tblExc"></div>
+  </section>
+
+  <section class="tab" id="t-review">
+    <h2>На пересмотр цены</h2>
+    <p class="hint">Наценка ниже порога — в автозакупку не идут. Решение: поднять цену, сменить поставщика или вывести из ассортимента. Колонка «Заказали бы» — объём при сохранении позиции.</p>
+    <div class="filters" id="f-rev"></div>
+    <div id="tblRev"></div>
+    <h2 style="margin-top:24px">Мёртвый ассортимент</h2>
+    <p class="hint">Нет продаж 12+ месяцев. Не закупать; остатки — на распродажу или списание.</p>
+    <div class="filters" id="f-dead"></div>
+    <div id="tblDead"></div>
+  </section>
+
+  <section class="tab" id="t-sku">
+    <div class="filters">
+      <input id="skuSearch" list="skuList" placeholder="Найти SKU, например SKU-197B08" autocomplete="off">
+      <datalist id="skuList"></datalist>
+    </div>
+    <div id="skuCard"><div class="card empty">Выберите товар в любой таблице или найдите по коду.</div></div>
+  </section>
+
+  <section class="tab" id="t-model">
+    <div class="grid two">
+      <div class="card">
+        <h2>Проверка прогноза на истории</h2>
+        <p class="hint" id="btHint"></p>
+        <div id="btTbl"></div>
+        <div class="legend" id="btLegend" style="margin-top:12px"></div>
+        <div class="chart-box sm"><canvas id="btChart" aria-label="Прогноз против факта"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Сезонность категорий</h2>
+        <p class="hint">Индекс месяца: 1,0 — средний месяц. Обогреватели — пик в октябре, триммеры — в мае, смесители — ровно.</p>
+        <div class="legend" id="seasonLegend"></div>
+        <div class="chart-box"><canvas id="seasonChart" aria-label="Сезонные индексы категорий"></canvas></div>
+      </div>
+    </div>
+    <div class="card method" style="margin-top:12px">
+      <h2>Как считается рекомендация</h2>
+      <div id="method"></div>
+    </div>
+  </section>
+
+  <footer id="foot"></footer>
+</div>
+
+<script id="plan-data" type="application/json">/*__DATA__*/null</script>
+<script>
+const P = JSON.parse(document.getElementById('plan-data').textContent);
+const $ = s => document.querySelector(s);
+const nf = new Intl.NumberFormat('ru-RU');
+const n = v => v == null ? '—' : nf.format(Math.round(v));
+const n1 = v => v == null ? '—' : new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1}).format(v);
+const dt = s => { if(!s) return '—'; const [y,m,d] = s.split('-'); return d ? `${d}.${m}.${y}` : `${m}.${y}`; };
+const MONTHS = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+const mLabel = s => { const [y,m] = s.split('-'); return `${MONTHS[+m-1]} ${y.slice(2)}`; };
+const CAT_RU = {sanitary_faucets:'Смесители',trimmer_blades_accessories:'Лески и ножи',string_trimmers:'Триммеры',grain_mills:'Зернодробилки',concrete_mixers:'Бетономешалки',space_heaters:'Обогреватели'};
+const CATS = Object.keys(CAT_RU);
+const STATUS_RU = {order_now:'Заказать сейчас',order_soon:'Заказать ≤60 дн.',planned:'Запланирован',ok:'Запаса хватает',low_markup:'Пересмотр цены',dead:'Мёртвый'};
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const catColor = c => css('--s' + (CATS.indexOf(c) + 1));
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const BY = Object.fromEntries(P.skus.map(r => [r.sku, r]));
+const K = P.kpi, M = P.meta, POL = M.params.policy;
+
+function sev(d){
+  if(!d) return '<span class="sev ok">✓ нет</span>';
+  return d.severity === 'critical' ? '<span class="sev critical">▲ критично</span>' : '<span class="sev high">● высокий</span>';
+}
+function statusTag(s){
+  const cls = s==='order_now'?'critical':s==='order_soon'?'high':s==='low_markup'?'warn':s==='ok'||s==='planned'?'ok':'';
+  return `<span class="sev ${cls}">${STATUS_RU[s]}</span>`;
+}
+
+/* ---------- theme ---------- */
+(function(){
+  let saved = null; try{ saved = localStorage.getItem('theme'); }catch(e){}
+  if(saved) document.documentElement.setAttribute('data-theme', saved);
+  $('#themeBtn').onclick = () => {
+    const cur = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const nx = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', nx);
+    try{ localStorage.setItem('theme', nx); }catch(e){}
+    redrawCharts();
+  };
+})();
+
+/* ---------- header & tabs ---------- */
+$('#sub').innerHTML = `Данные на <b>${dt(M.asof)}</b> · выгрузка <code>${esc(M.source)}</code> · расчёт ${M.generated_at.replace('T',' ')} · ${n(K.skus_active)} активных SKU из ${n(K.skus_total)}`;
+$('#winDays').textContent = POL.order_now_window_days;
+$('#excM').textContent = POL.excess_months;
+const TABS = [
+  ['summary','Обзор'],['now','Заказать сейчас',K.order_now_skus],['cal','Календарь'],
+  ['risk','Риски',K.deficit_critical+K.deficit_high+K.excess_skus],['review','Пересмотр и неликвид',K.low_markup_skus+K.skus_dead],
+  ['sku','Карточка товара'],['model','Модель и точность']];
+$('#tabs').innerHTML = TABS.map(([id,l,c]) => `<button type="button" data-t="${id}">${l}${c!=null?`<span class="cnt">${n(c)}</span>`:''}</button>`).join('');
+function show(id){
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.t===id));
+  document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id==='t-'+id));
+  try{ history.replaceState(null,'','#'+id); }catch(e){}
+  if(id==='model') drawModel();
+}
+$('#tabs').onclick = e => { const b = e.target.closest('button'); if(b) show(b.dataset.t); };
+
+/* ---------- KPIs ---------- */
+const KPI = [
+  ['now','var(--critical)','Заказать сейчас',n(K.order_now_skus)+' SKU',`${n(K.order_now_units)} шт · ${P.suppliers_now.length} поставщиков`],
+  ['cal','var(--serious)','Заказать в ближайшие 60 дн.',n(K.order_soon_skus)+' SKU',`ещё ${n(K.planned_skus)} — позже по календарю`],
+  ['risk','var(--critical)','Риск дефицита',n(K.deficit_critical+K.deficit_high)+' SKU',`${n(K.deficit_critical)} критичных · потеря ≈${n(K.deficit_lost_units)} шт`],
+  ['risk','var(--warning)','Избыточный запас',n(K.excess_skus)+' SKU',`${n(K.excess_units)} шт сверх ${POL.excess_months} мес. спроса`],
+  ['now','var(--accent)','В пути',n(K.transit_units)+' шт',`${n(K.overdue_po)} просроченных строк PO`],
+  ['review','var(--warning)','Пересмотр цены',n(K.low_markup_skus)+' SKU',`наценка < ${M.params.economics.min_markup_pct}%`],
+  ['review','var(--muted)','Мёртвый ассортимент',n(K.skus_dead)+' SKU',`${n(K.dead_with_stock)} с остатком на складе`],
+];
+$('#kpis').innerHTML = KPI.map(([t,c,l,v,nt]) => `<div class="card kpi" data-t="${t}" role="button" tabindex="0"><div class="lbl"><span class="dot" style="background:${c}"></span>${l}</div><div class="val">${v}</div><div class="note">${nt}</div></div>`).join('');
+$('#kpis').onclick = e => { const k = e.target.closest('.kpi'); if(k) show(k.dataset.t); };
+
+/* ---------- brief ---------- */
+$('#brief').innerHTML = P.brief_html;
+$('#briefSrc').textContent = P.brief_src === 'ai' ? 'Написана ИИ-агентом (Claude) по результатам расчёта. Все цифры — из расчёта.' : 'Автосводка по результатам расчёта.';
+
+/* ---------- generic table ---------- */
+function table(el, rows, cols, opt={}){
+  let sortKey = opt.sort || null, dir = opt.dir || -1;
+  function render(){
+    let rs = rows.slice();
+    if(sortKey){ const c = cols.find(c=>c.k===sortKey); const g = c.v || (r=>r[c.k]);
+      rs.sort((a,b)=>{ const x=g(a), y=g(b); if(x==null) return 1; if(y==null) return -1; return (x>y?1:x<y?-1:0)*dir; }); }
+    if(!rs.length){ el.innerHTML = '<div class="tbl-wrap"><div class="empty">Нет позиций</div></div>'; return; }
+    const lim = opt.limit || 1000;
+    el.innerHTML = `<div class="tbl-wrap"${opt.noMax?' style="max-height:none"':''}><table><thead><tr>${cols.map(c=>`<th class="${c.num?'num':''}" data-k="${c.k}">${c.l}${sortKey===c.k?` <span class="arr">${dir>0?'▲':'▼'}</span>`:''}</th>`).join('')}</tr></thead><tbody>${
+      rs.slice(0,lim).map(r=>`<tr data-sku="${esc(r.sku||'')}">${cols.map(c=>`<td class="${c.num?'num':''} ${c.wrap?'wrap':''}">${c.h?c.h(r):esc((c.v?c.v(r):r[c.k]) ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${rs.length>lim?`<div class="hint">Показано ${lim} из ${rs.length}</div>`:''}`;
+    el.querySelectorAll('th').forEach(th => th.onclick = () => { const k = th.dataset.k; dir = sortKey===k ? -dir : -1; sortKey = k; render(); });
+    el.querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => { if(tr.dataset.sku && BY[tr.dataset.sku]) openSku(tr.dataset.sku); });
+  }
+  render();
+  return { set(r){ rows = r; render(); } };
+}
+function filters(el, base, onChange, extra=[]){
+  const cats = [...new Set(base.map(r=>r.category))].sort();
+  const sups = [...new Set(base.map(r=>r.supplier))].sort();
+  el.innerHTML = `<input type="search" placeholder="Поиск по SKU / поставщику" data-f="q">
+    <select data-f="cat"><option value="">Все категории</option>${cats.map(c=>`<option value="${c}">${CAT_RU[c]||c}</option>`).join('')}</select>
+    <select data-f="sup"><option value="">Все поставщики</option>${sups.map(s=>`<option>${s}</option>`).join('')}</select>
+    <select data-f="abc"><option value="">ABC: все</option><option>A</option><option>B</option><option>C</option></select>
+    ${extra.join('')}
+    <button class="btn" type="button" data-f="csv">⬇ CSV</button>`;
+  const st = {};
+  const apply = () => onChange(base.filter(r =>
+    (!st.q || (r.sku+' '+r.supplier).toLowerCase().includes(st.q.toLowerCase())) &&
+    (!st.cat || r.category===st.cat) && (!st.sup || r.supplier===st.sup) && (!st.abc || r.abc===st.abc) &&
+    (!st.sev || (st.sev==='critical' ? r.deficit && r.deficit.severity==='critical' : true))));
+  el.querySelectorAll('input,select').forEach(i => i.oninput = () => { st[i.dataset.f] = i.value; apply(); });
+  return { apply, csv(fn){ el.querySelector('[data-f=csv]').onclick = fn; } };
+}
+function downloadCsv(name, rows, cols){
+  const head = cols.map(c=>c.l).join(';');
+  const body = rows.map(r => cols.map(c => { const v = c.v ? c.v(r) : r[c.k]; return '"' + String(v ?? '').replace(/"/g,'""') + '"'; }).join(';')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿'+head+'\n'+body], {type:'text/csv;charset=utf-8'}));
+  a.download = name; a.click();
+}
+const catCol = {k:'category',l:'Категория',v:r=>CAT_RU[r.category]||r.category};
+
+/* ---------- order now ---------- */
+const NOW = P.skus.filter(r=>r.status==='order_now');
+const nowCols = [
+  {k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'}, {k:'abc',l:'ABC'},
+  {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)}, {k:'transit_qty',l:'В пути',num:1,h:r=>n(r.transit_qty)},
+  {k:'level',l:'Спрос/мес',num:1,h:r=>n(r.level)},
+  {k:'stockout_date',l:'Хватит до',v:r=>r.stockout_date||'9999',h:r=>r.stockout_date?dt(r.stockout_date):'> горизонта'},
+  {k:'qty',l:'Заказать, шт',num:1,v:r=>r.orders[0].qty,h:r=>`<b>${n(r.orders[0].qty)}</b>`},
+  {k:'arr',l:'Приход ≈',v:r=>r.orders[0].arrival_date,h:r=>dt(r.orders[0].arrival_date)},
+  {k:'wt',l:'Вес, кг',num:1,v:r=>r.orders[0].weight_kg,h:r=>n1(r.orders[0].weight_kg)},
+  {k:'def',l:'Дефицит до прихода',v:r=>r.deficit?(r.deficit.severity==='critical'?2:1):0,h:r=>sev(r.deficit)},
+  {k:'lost',l:'Потеря, шт',num:1,v:r=>r.deficit?r.deficit.lost_units:0,h:r=>r.deficit?n(r.deficit.lost_units):'—'},
+];
+const tNow = table($('#tblNow'), NOW, nowCols, {sort:'lost'});
+const fNow = filters($('#f-now'), NOW, rs=>tNow.set(rs), [`<select data-f="sev"><option value="">Все</option><option value="critical">Только критичный дефицит</option></select>`]);
+fNow.csv(()=>downloadCsv('zakazat_seychas.csv', NOW, nowCols));
+
+/* ---------- suppliers ---------- */
+table($('#supTbl'), P.suppliers_now, [
+  {k:'supplier',l:'Поставщик',h:r=>`<b>${r.supplier}</b>`}, {k:'skus',l:'SKU',num:1}, {k:'units',l:'Штук',num:1,h:r=>n(r.units)},
+  {k:'fill_rate',l:'Исполнение PO',num:1,h:r=>r.fill_rate==null?'—':r.fill_rate+'%'},
+  {k:'categories',l:'Категории',v:r=>r.categories.map(c=>CAT_RU[c]||c).join(', ')}], {sort:'units', limit:12});
+
+/* ---------- data quality ---------- */
+$('#dq').innerHTML = (P.data_quality||[]).map(x=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)"><div><div style="font-weight:600">${esc(x.title)}</div><div class="hint" style="margin:2px 0 0">${esc(x.note)}</div></div><div style="white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:600">${esc(x.value)}</div></div>`).join('');
+
+/* ---------- diff ---------- */
+(function(){
+  const d = P.diff || {first_run:true};
+  if(d.first_run){ $('#diff').innerHTML = '<p class="hint">Это первый запуск — сравнивать не с чем. Со следующего запуска здесь появятся новые позиции к заказу, изменившиеся объёмы и новые риски.</p>'; return; }
+  const box = (t,arr,fmt) => `<div class="card"><div class="hint" style="margin:0">${t}</div><b>${arr.length}</b>${arr.length?`<div style="font-size:12px;color:var(--text-2);margin-top:4px">${arr.slice(0,6).map(fmt).join(', ')}${arr.length>6?'…':''}</div>`:''}</div>`;
+  $('#diff').innerHTML = `<p class="hint">Сравнение с расчётом от ${d.prev_generated_at.replace('T',' ')} (данные на ${dt(d.prev_asof)}).</p><div class="diff-list">
+    ${box('Новые «заказать сейчас»', d.new_order_now, x=>`${x.sku} (${n(x.qty)})`)}
+    ${box('Объём изменился ≥15%', d.qty_changed, x=>`${x.sku}: ${n(x.was)}→${n(x.now)}`)}
+    ${box('Новые риски дефицита', d.new_deficit, x=>x.sku)}
+    ${box('Ушли из «заказать сейчас»', d.dropped_order_now, x=>x.sku)}
+    ${box('Риск дефицита снят', d.resolved_deficit, x=>x.sku)}</div>`;
+})();
+
+/* ---------- calendar ---------- */
+const PLANROWS = P.skus.filter(r=>!['dead','low_markup'].includes(r.status));
+const ORDERS = PLANROWS.flatMap(r => r.orders.filter(o=>o.order_day<=365).map(o => ({...o, sku:r.sku, category:r.category, supplier:r.supplier, abc:r.abc, stock:r.stock, status:r.status, deficit:r.deficit})));
+function renderCal(list){
+  const by = {};
+  list.forEach(o => (by[o.order_date.slice(0,7)] ||= []).push(o));
+  const months = Object.keys(by).sort();
+  $('#calList').innerHTML = months.map((m,i) => {
+    const os = by[m], u = os.reduce((a,o)=>a+o.qty,0);
+    return `<details class="month-block" ${i===0?'open':''}><summary><span>${mLabel(m)}${i===0&&m===M.current_month?' — разместить сейчас':''}</span><span class="tag">${os.length} заказов · ${n(u)} шт</span></summary><div data-m="${m}"></div></details>`;
+  }).join('') || '<div class="card empty">Нет заказов</div>';
+  months.forEach(m => table($('#calList').querySelector(`[data-m="${m}"]`), by[m], [
+    {k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'}, {k:'abc',l:'ABC'},
+    {k:'order_date',l:'Заказать до',h:r=>dt(r.order_date)}, {k:'arrival_date',l:'Приход ≈',h:r=>dt(r.arrival_date)},
+    {k:'qty',l:'Кол-во',num:1,h:r=>`<b>${n(r.qty)}</b>`}, {k:'weight_kg',l:'Вес, кг',num:1,h:r=>n1(r.weight_kg)}], {sort:'qty', noMax:true}));
+}
+renderCal(ORDERS);
+const fCal = filters($('#f-cal'), ORDERS, renderCal);
+fCal.csv(()=>downloadCsv('kalendar_zakazov.csv', ORDERS, [{k:'sku',l:'SKU'},catCol,{k:'supplier',l:'Поставщик'},{k:'order_date',l:'Заказать до'},{k:'arrival_date',l:'Приход'},{k:'qty',l:'Кол-во'},{k:'weight_kg',l:'Вес, кг'}]));
+
+/* ---------- risks ---------- */
+const DEF = P.skus.filter(r=>r.deficit && r.status!=='dead');
+const defCols = [
+  {k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'}, {k:'abc',l:'ABC'},
+  {k:'sev',l:'Уровень',v:r=>r.deficit.severity==='critical'?2:1,h:r=>sev(r.deficit)},
+  {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)}, {k:'transit_qty',l:'В пути',num:1,h:r=>n(r.transit_qty)},
+  {k:'so',l:'Дефицит с',v:r=>r.deficit.stockout_date,h:r=>dt(r.deficit.stockout_date)},
+  {k:'gap',l:'Дней без товара',num:1,v:r=>r.deficit.gap_days},
+  {k:'lost',l:'Потеря продаж, шт',num:1,v:r=>r.deficit.lost_units,h:r=>`<b>${n(r.deficit.lost_units)}</b>`},
+  {k:'st',l:'Статус',v:r=>STATUS_RU[r.status],h:r=>statusTag(r.status)}];
+const tDef = table($('#tblDef'), DEF, defCols, {sort:'lost'});
+const fDef = filters($('#f-def'), DEF, rs=>tDef.set(rs)); fDef.csv(()=>downloadCsv('deficit.csv', DEF, defCols));
+const EXC = P.skus.filter(r=>r.excess && r.status!=='dead');
+const excCols = [
+  {k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'}, {k:'abc',l:'ABC'},
+  {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)}, {k:'transit_qty',l:'В пути',num:1,h:r=>n(r.transit_qty)},
+  {k:'level',l:'Спрос/мес',num:1,h:r=>n1(r.level)},
+  {k:'months',l:'Запас, мес',num:1,v:r=>r.excess.months,h:r=>r.excess.months==null?'∞':n1(r.excess.months)},
+  {k:'eu',l:'Избыток, шт',num:1,v:r=>r.excess.excess_units,h:r=>`<b>${n(r.excess.excess_units)}</b>`},
+  {k:'st',l:'Статус',v:r=>STATUS_RU[r.status],h:r=>statusTag(r.status)}];
+const tExc = table($('#tblExc'), EXC, excCols, {sort:'eu'});
+const fExc = filters($('#f-exc'), EXC, rs=>tExc.set(rs)); fExc.csv(()=>downloadCsv('izbytok.csv', EXC, excCols));
+
+/* ---------- review / dead ---------- */
+const REV = P.skus.filter(r=>r.status==='low_markup');
+const revCols = [
+  {k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'},
+  {k:'markup',l:'Наценка, %',num:1,h:r=>`<b>${n1(r.markup)}</b>`}, {k:'units_12m',l:'Продано за 12 мес',num:1,h:r=>n(r.units_12m)},
+  {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)}, {k:'stockout_date',l:'Хватит до',v:r=>r.stockout_date||'9999',h:r=>r.stockout_date?dt(r.stockout_date):'> горизонта'},
+  {k:'would',l:'Заказали бы, шт',num:1,v:r=>r.orders.length?r.orders[0].qty:0,h:r=>r.orders.length?`${n(r.orders[0].qty)} до ${dt(r.orders[0].order_date)}`:'—'}];
+const tRev = table($('#tblRev'), REV, revCols, {sort:'units_12m'});
+const fRev = filters($('#f-rev'), REV, rs=>tRev.set(rs)); fRev.csv(()=>downloadCsv('peresmotr_ceny.csv', REV, revCols));
+const DEAD = P.skus.filter(r=>r.status==='dead');
+const deadCols = [{k:'sku',l:'SKU',h:r=>`<b>${r.sku}</b>`}, catCol, {k:'supplier',l:'Поставщик'},
+  {k:'last_sale',l:'Последняя продажа',h:r=>r.last_sale?dt(r.last_sale):'нет'}, {k:'stock',l:'Остаток',num:1,h:r=>n(r.stock)}];
+const tDead = table($('#tblDead'), DEAD, deadCols, {sort:'stock'});
+const fDead = filters($('#f-dead'), DEAD, rs=>tDead.set(rs)); fDead.csv(()=>downloadCsv('mertvyi_assortiment.csv', DEAD, deadCols));
+
+/* ---------- charts ---------- */
+const charts = {};
+function baseOpts(extra={}){
+  const grid = css('--grid'), txt = css('--text-2');
+  return Object.assign({responsive:true, maintainAspectRatio:false, animation:false,
+    interaction:{mode:'index', intersect:false},
+    plugins:{legend:{display:false}, tooltip:{backgroundColor:css('--surface'), titleColor:css('--text'), bodyColor:css('--text-2'), borderColor:css('--border'), borderWidth:1, padding:10,
+      callbacks:{label:c=>` ${c.dataset.label}: ${c.parsed.y==null?'—':nf.format(Math.round(c.parsed.y*10)/10)}`}}},
+    scales:{x:{grid:{display:false}, ticks:{color:txt, maxRotation:0, autoSkip:true}, border:{color:grid}},
+            y:{grid:{color:grid}, ticks:{color:txt, callback:v=>nf.format(v)}, border:{display:false}, beginAtZero:true}}}, extra);
+}
+function legend(el, items){ el.innerHTML = items.map(([c,l,dash])=>`<span><i style="background:${dash?'transparent':c};${dash?`border:2px dashed ${c};height:0;width:14px;border-radius:0`:''}"></i>${l}</span>`).join(''); }
+function mk(id, cfg){ if(charts[id]) charts[id].destroy(); charts[id] = new Chart(document.getElementById(id), cfg); }
+
+function drawCal(){
+  const months = [...new Set(P.calendar.map(m=>m.month))].sort().slice(0,12);
+  const cats = CATS.filter(c => P.calendar.some(m=>m.by_cat[c]));
+  legend($('#calLegend'), cats.map(c=>[catColor(c), CAT_RU[c]]));
+  mk('calChart', {type:'bar', data:{labels:months.map(mLabel), datasets:cats.map(c=>({label:CAT_RU[c], data:months.map(m=>(P.calendar.find(x=>x.month===m)?.by_cat[c])||0),
+      backgroundColor:catColor(c), borderColor:css('--surface'), borderWidth:{top:2}, borderRadius:2, borderSkipped:false, maxBarThickness:36}))},
+    options:baseOpts({scales:{...baseOpts().scales, x:{...baseOpts().scales.x, stacked:true}, y:{...baseOpts().scales.y, stacked:true, title:{display:true,text:'шт',color:css('--muted')}}}})});
+}
+let modelDrawn = false;
+function drawModel(force){
+  if(modelDrawn && !force) return; modelDrawn = true;
+  const S = P.season;
+  const cats = CATS.filter(c=>S[c]);
+  legend($('#seasonLegend'), cats.map(c=>[catColor(c), CAT_RU[c]]));
+  mk('seasonChart', {type:'line', data:{labels:MONTHS, datasets:cats.map(c=>({label:CAT_RU[c], data:S[c], borderColor:catColor(c), backgroundColor:catColor(c), borderWidth:2, pointRadius:0, pointHoverRadius:5, tension:.3}))},
+    options:baseOpts()});
+  const B = P.backtest;
+  if(!B){ $('#btHint').textContent='Бэктест не запускался.'; return; }
+  $('#btHint').innerHTML = `Модель построена на данных до ${dt(B.period[0])}, прогноз сравнён с фактом ${dt(B.period[0])} — ${dt(B.period[1])}. Месяцы, когда товар кончился (${B.stockout_share}% пар SKU×месяц), из сравнения исключены: там продажи ≠ спрос. WAPE — суммарная ошибка в % от факта, меньше — лучше. «Квартал» — ошибка суммы за 3 месяца, ближе к тому, как закупка реально использует прогноз.`;
+  const rows = [['Все категории', B.total], ...Object.entries(B.by_category).map(([c,v])=>[CAT_RU[c]||c, v])];
+  const best = (v, k) => { const a=[v['wape'+k+'model'],v['wape'+k+'avg12'],v['wape'+k+'ly']]; return Math.min(...a); };
+  const cell = (v,k,which) => { const x = v['wape'+k+which]; return x===best(v,k) ? `<b>${n1(x)}%</b>` : n1(x)+'%'; };
+  $('#btTbl').innerHTML = `<div class="tbl-wrap" style="max-height:none"><table><thead><tr><th rowspan="2">Категория</th><th rowspan="2" class="num">SKU</th><th colspan="3" style="text-align:center">По месяцам</th><th colspan="3" style="text-align:center">По кварталам</th></tr><tr><th class="num" style="top:33px">Модель</th><th class="num" style="top:33px">Ср. 12</th><th class="num" style="top:33px">Год назад</th><th class="num" style="top:33px">Модель</th><th class="num" style="top:33px">Ср. 12</th><th class="num" style="top:33px">Год назад</th></tr></thead><tbody>${
+    rows.map(([l,v])=>`<tr style="cursor:default"><td>${l}</td><td class="num">${v.skus}</td><td class="num">${cell(v,'_','model')}</td><td class="num">${cell(v,'_','avg12')}</td><td class="num">${cell(v,'_','ly')}</td><td class="num">${cell(v,'_q_','model')}</td><td class="num">${cell(v,'_q_','avg12')}</td><td class="num">${cell(v,'_q_','ly')}</td></tr>`).join('')}</tbody></table></div>`;
+  legend($('#btLegend'), [[css('--text'),'Факт'],[css('--s1'),'Модель'],[css('--muted'),'Среднее за 12 мес', true]]);
+  mk('btChart', {type:'line', data:{labels:B.monthly.map(m=>mLabel(m.month)), datasets:[
+    {label:'Факт', data:B.monthly.map(m=>m.actual), borderColor:css('--text'), backgroundColor:css('--text'), borderWidth:2, pointRadius:3},
+    {label:'Модель', data:B.monthly.map(m=>m.model), borderColor:css('--s1'), backgroundColor:css('--s1'), borderWidth:2, pointRadius:3},
+    {label:'Среднее за 12 мес', data:B.monthly.map(m=>m.avg12), borderColor:css('--muted'), borderDash:[5,4], borderWidth:2, pointRadius:0}]}, options:baseOpts()});
+}
+
+/* ---------- SKU card ---------- */
+$('#skuList').innerHTML = P.skus.filter(r=>r.status!=='dead').map(r=>`<option value="${r.sku}">${CAT_RU[r.category]} · ${STATUS_RU[r.status]}</option>`).join('');
+$('#skuSearch').onchange = e => { const v = e.target.value.trim().toUpperCase(); if(BY[v]) openSku(v); };
+let curSku = null;
+function openSku(id){
+  curSku = id; const r = BY[id]; show('sku'); $('#skuSearch').value = id;
+  try{ history.replaceState(null,'','#sku='+id); }catch(e){}
+  const tr = r.transit.map(t=>`${n(t.qty)} шт — ${dt(t.promised)}${t.overdue_days?` (просрочен ${t.overdue_days} дн.${t.counted?'':', не учтён'})`:''}`).join('<br>') || 'нет';
+  $('#skuCard').innerHTML = `<div class="card">
+    <div class="sku-head"><span class="id">${r.sku}</span>${statusTag(r.status)}<span class="tag">${CAT_RU[r.category]}</span><span class="tag">${r.supplier}</span><span class="tag">ABC ${r.abc} · XYZ ${r.xyz}</span>${r.markup!=null?`<span class="tag">наценка ${n1(r.markup)}%</span>`:''}</div>
+    <div class="facts">
+      <div class="fact"><div class="k">Остаток сейчас</div><div class="v">${n(r.stock)}</div></div>
+      <div class="fact"><div class="k">В пути</div><div class="v">${n(r.transit_qty)}</div></div>
+      <div class="fact"><div class="k">Спрос, ср. месяц</div><div class="v">${n1(r.level)}</div></div>
+      <div class="fact"><div class="k">Хватит до</div><div class="v">${r.stockout_date?dt(r.stockout_date):'> 18 мес'}</div></div>
+      <div class="fact"><div class="k">Плечо поставки</div><div class="v">${r.lead_days} дн.</div></div>
+      <div class="fact"><div class="k">Страховой запас</div><div class="v">${n(r.ss)}</div></div>
+      <div class="fact"><div class="k">Следующий заказ</div><div class="v">${r.orders.length?dt(r.orders[0].order_date):'не нужен'}</div></div>
+      <div class="fact"><div class="k">Объём</div><div class="v">${r.orders.length?n(r.orders[0].qty)+' шт':'—'}</div></div>
+    </div>
+    <div class="grid two">
+      <div><h3>Спрос: факт и прогноз, шт/мес</h3><div class="legend" id="skuL1"></div><div class="chart-box sm"><canvas id="skuChart1"></canvas></div></div>
+      <div><h3>Остаток на конец месяца, шт</h3><div class="legend" id="skuL2"></div><div class="chart-box sm"><canvas id="skuChart2"></canvas></div></div>
+    </div>
+    <div class="grid two" style="margin-top:8px">
+      <div><h3>Почему такая рекомендация</h3><ol class="explain">${r.explain.map(x=>`<li>${esc(x)}</li>`).join('')}</ol>
+        ${r.flags.length?`<h3>На что обратить внимание</h3><ul class="flags">${r.flags.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}</div>
+      <div><h3>Заказы в пути</h3><p style="margin:0">${tr}</p>
+        <h3>План заказов на 12 мес</h3>${r.orders.length?`<div class="tbl-wrap" style="max-height:none"><table><thead><tr><th>Заказать до</th><th>Приход ≈</th><th class="num">Кол-во</th></tr></thead><tbody>${r.orders.filter(o=>o.order_day<=365).map(o=>`<tr style="cursor:default"><td>${dt(o.order_date)}</td><td>${dt(o.arrival_date)}</td><td class="num">${n(o.qty)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="hint">Заказов не требуется.</p>'}</div>
+    </div></div>`;
+  drawSku(r);
+}
+function drawSku(r){
+  const H = M.hist_labels, F = M.fut_labels.slice(0,12);
+  const labels = [...H.slice(0,-1), ...F];
+  const hist = [...r.chart.hist_y.slice(0,-1), ...F.map(()=>null)];
+  const fc = [...H.slice(0,-2).map(()=>null), r.chart.hist_y[H.length-2], ...r.chart.fc12];
+  legend($('#skuL1'), [[css('--s1'),'Продажи (факт)'],[css('--s2'),'Прогноз спроса', true]]);
+  mk('skuChart1', {type:'bar', data:{labels:labels.map(mLabel), datasets:[
+    {type:'bar', label:'Продажи', data:hist, backgroundColor:css('--s1'), borderRadius:2, maxBarThickness:14},
+    {type:'line', label:'Прогноз', data:fc, borderColor:css('--s2'), backgroundColor:css('--s2'), borderDash:[5,4], borderWidth:2, pointRadius:0, pointHoverRadius:4, spanGaps:false}]}, options:baseOpts()});
+  const sl = [...H.slice(0,-1), ...M.fut_labels];
+  const hs = [...r.chart.hist_stock.slice(0,-1), ...M.fut_labels.map(()=>null)];
+  const pad = H.slice(0,-1).map(()=>null);
+  legend($('#skuL2'), [[css('--s3'),'Остаток на 1-е (факт)'],[css('--critical'),'Без новых заказов', true],[css('--s1'),'С рекомендованными заказами']]);
+  mk('skuChart2', {type:'line', data:{labels:sl.map(mLabel), datasets:[
+    {label:'Факт', data:hs, borderColor:css('--s3'), backgroundColor:css('--s3'), borderWidth:2, pointRadius:0, pointHoverRadius:4},
+    {label:'Без заказов', data:[...pad, ...r.chart.proj_base], borderColor:css('--critical'), borderDash:[5,4], borderWidth:2, pointRadius:0, pointHoverRadius:4},
+    {label:'С заказами', data:[...pad, ...r.chart.proj_plan], borderColor:css('--s1'), backgroundColor:css('--s1'), borderWidth:2, pointRadius:0, pointHoverRadius:4}]}, options:baseOpts()});
+}
+
+/* ---------- method ---------- */
+(function(){
+  const p = M.params;
+  $('#method').innerHTML = `
+  <p><b>1. Спрос, а не продажи.</b> Для каждого месяца проверяем, был ли товар в наличии (остаток на 1-е + приходы − продажи). Месяцы, когда товар кончился, не используются для оценки: там продажи занижены. Разовые оптовые отгрузки выше ${p.forecast.outlier_k}× ожидаемого срезаются.</p>
+  <p><b>2. Прогноз = уровень × сезонность.</b> Сезонный профиль — по ${''}полным годам истории категории, уточнённый собственной историей SKU. Уровень — взвешенное среднее за ${p.forecast.history_months} мес. (вес свежих месяцев выше, полупериод ${p.forecast.half_life_months} мес.).</p>
+  <p><b>3. Проекция остатков по дням</b> на ${Math.round(p.policy.horizon_days/30)} мес.: остаток сейчас (снимок на 1-е − продажи + приходы) плюс открытые заказы с датой прихода. Просроченные PO до ${p.policy.overdue_trust_days} дн. считаем едущими, старше — не учитываем и показываем к проверке.</p>
+  <p><b>4. Когда заказывать:</b> день, когда остаток опустится ниже страхового запаса, минус плечо поставки (медиана плановых сроков PO поставщика за 2 года → история SKU → норматив; не более ${p.lead_time.max_days} дн. + ${p.lead_time.buffer_days} дн. на таможню). Если эта дата ближе ${p.policy.order_now_window_days} дн. — «заказать сейчас».</p>
+  <p><b>5. Сколько:</b> прогноз спроса на ${p.policy.review_days} дн. после прихода + страховой запас − ожидаемый остаток на дату прихода − что ещё приедет; округление вверх до кратности партии из истории заказов. Страховой запас: z(уровень сервиса A ${p.policy.service_level_A*100}% / B ${p.policy.service_level_B*100}% / C ${p.policy.service_level_C*100}%) × σ × √плечо, не более ${p.policy.max_safety_months} мес. спроса.</p>
+  <p><b>6. Отсечения:</b> наценка ниже ${p.economics.min_markup_pct}% — в список на пересмотр цены, не в закупку; нет продаж ${p.economics.dead_months}+ мес. — мёртвый ассортимент; запас больше ${p.policy.excess_months} мес. — избыток.</p>
+  <p class="hint">Все параметры — в <code>config.toml</code>; расчёт детерминированный (Python), ИИ-агент запускает его, проверяет аномалии и пишет сводку.</p>`;
+})();
+
+function redrawCharts(){ drawCal(); if(modelDrawn) drawModel(true); if(curSku && $('#t-sku').classList.contains('on')) drawSku(BY[curSku]); }
+drawCal();
+$('#foot').innerHTML = `Система планирования закупок · срез ${dt(M.asof)} · пересчёт по расписанию или командой <code>/procurement-run</code>`;
+const h = location.hash.slice(1);
+if(h.startsWith('sku=') && BY[h.slice(4)]) openSku(h.slice(4)); else show(TABS.some(t=>t[0]===h) ? h : 'summary');
+</script>
+</body>
+</html>

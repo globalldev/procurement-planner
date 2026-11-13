@@ -1,0 +1,59 @@
+# Параметры планирования закупок.
+# Всё, что влияет на рекомендации, живёт здесь, а не в коде.
+# Меняете значение -> перезапускаете `python -m planner run` -> дашборд пересчитан.
+
+[data]
+dir = "data/raw"              # папка с актуальной выгрузкой ERP (CSV)
+inbox = "data/inbox"          # сюда кладут новый zip; run заберёт самый свежий
+asof = "auto"                 # дата среза: "auto" = из имени zip / последних данных, либо "2026-08-13"
+
+[economics]
+min_markup_pct = 25           # ниже — не в автозакупку, а в список на пересмотр цены/вывод
+dead_months = 12              # нет продаж N мес -> мёртвый ассортимент
+
+[lead_time]
+default_import_days = 123     # медиана планового плеча по факту PO
+default_local_days = 30
+default_unknown_days = 123
+max_days = 180                # верхняя граница плеча
+min_days = 14
+buffer_days = 14              # растаможка + доставка со склада порта
+
+[policy]
+review_days = 90              # на сколько дней после прихода должен хватить заказ (цикл закупки)
+order_now_window_days = 21    # если крайняя дата заказа ближе этого — «заказать сейчас»
+excess_months = 12            # запас дольше N мес прогноза -> избыток
+service_level_A = 0.95        # целевой уровень сервиса по ABC
+service_level_B = 0.90
+service_level_C = 0.85
+max_safety_months = 3         # страховой запас не больше N мес среднего спроса
+overdue_trust_days = 60       # открытый PO просрочен меньше — считаем, что едет (приход через grace)
+overdue_grace_days = 30
+horizon_days = 540            # горизонт проекции остатков
+min_order_gap_days = 30       # заказы одному SKU чаще — объединяем в один
+offseason_index = 0.5         # у сезонных товаров не планируем приход, если средний индекс цикла ниже
+min_deficit_units = 3         # меньшие потери не считаем риском дефицита (шум)
+
+[forecast]
+history_months = 12           # окно оценки уровня спроса
+half_life_months = 6          # свежие месяцы весят больше
+seasonal_shrink_years = 6     # вес сезонности категории против собственной истории SKU (в «годах»)
+min_season_coverage = 0.8     # окно оценки почти целиком в мёртвом сезоне — не раздуваем уровень
+outlier_k = 1.5               # месяц выше k × ожидаемого — разовая оптовая отгрузка, срезаем
+trend_damping = 0.0           # 0 = без тренда (бэктест: тренд ухудшает прогноз на этих данных)
+min_sku_years_for_own_season = 2
+new_sku_months = 6            # история короче — новинка, прогноз осторожный
+
+[ai]
+enabled = true                # сводка закупщику через Claude Code (claude -p)
+model = "sonnet"
+timeout_sec = 480
+
+[publish]
+method = "git"                # "none" | "scp" (свой хостинг) | "git" (коммит docs/ в репозиторий с GitHub Pages)
+url = "https://globalldev.github.io/procurement-planner/"  # публичная ссылка на дашборд (для уведомления)
+target = ""                   # для scp: host:/path/
+ssh_config = ""
+
+[notify]
+telegram = false              # дайджест в Telegram после запуска (нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в .env)
