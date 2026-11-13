@@ -29,7 +29,8 @@ def ingest_inbox(inbox: Path, data_dir: Path) -> str | None:
     """Если в inbox лежит zip новее текущих данных — распаковать его в data_dir."""
     if not inbox.exists():
         return None
-    zips = sorted(inbox.glob("*.zip"), key=lambda p: p.stat().st_mtime)
+    # самая свежая выгрузка — по дате в имени файла, при равенстве — по времени изменения
+    zips = sorted(inbox.glob("*.zip"), key=lambda p: (_asof_from_name(p.name) or date.min, p.stat().st_mtime))
     if not zips:
         return None
     latest = zips[-1]

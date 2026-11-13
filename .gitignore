@@ -3,3 +3,4 @@ out/
 data/
 !data/README.md
 .env
+_video/
