@@ -587,7 +587,8 @@ function setThemeIcon(){ $('#themeBtn').innerHTML = ic(curTheme()==='dark' ? 'su
 })();
 
 /* ===================== header & tabs ===================== */
-$('#meta').innerHTML = `Данные на <b>${dt(M.asof)}</b> · пересчёт ${dt(M.generated_at.slice(0,10))} ${M.generated_at.slice(11,16)} · ${n(K.skus_active)} активных SKU`;
+$('#meta').innerHTML = `Данные на <b>${dt(M.asof)}</b> · пересчёт ${dt(M.generated_at.slice(0,10))} ${M.generated_at.slice(11,16)} · ${n(K.skus_active)} активных SKU`
+  + (M.stale ? ` · <span class="sev warn" title="${esc((M.warnings||[])[0]||'')}">выгрузке ${n(M.data_age_days)} дн. — нужна свежая</span>` : '');
 $('#winDays').textContent = POL.order_now_window_days;
 const TABS = [
   ['summary','Обзор','grid'],
@@ -622,7 +623,7 @@ function drawHero(){
   const ns = P.suppliers_now.length;
   $('#hero').innerHTML = `
     <div style="position:relative;z-index:1">
-      <div class="eyebrow">${ic('cart')}Сегодня к размещению</div>
+      <div class="eyebrow">${ic('cart')}${M.stale ? `К размещению на ${dt(M.asof)}` : 'Сегодня к размещению'}</div>
       <div class="big">${n(K.order_now_skus)} ${plural(K.order_now_skus,'позиция','позиции','позиций')} <small>· ${n(K.order_now_units)} шт</small></div>
       <div class="sub">У ${ns} ${plural(ns,'поставщика','поставщиков','поставщиков')}, крайняя дата заказа — в ближайшие ${POL.order_now_window_days} дн.${crit?` У ${crit} из них запас кончится раньше, чем дойдёт заказ, — нужна срочная или локальная поставка.`:''}</div>
       <div class="cta">
@@ -645,7 +646,7 @@ function drawHero(){
 
 /* ===================== KPI ===================== */
 const KPI = [
-  ['risk:deficit','alert','t-crit','Риск дефицита',`${n(K.deficit_critical+K.deficit_high)}<small> SKU</small>`,`${n(K.deficit_critical)} критичных · потеря ≈ ${n(K.deficit_lost_units)} шт до прихода заказа`],
+  ['risk:deficit','alert','t-crit','Риск дефицита',`${n(K.deficit_critical+K.deficit_high)}<small> SKU</small>`,`${n(K.deficit_critical)} критичных, ${n(K.deficit_out_now||0)} уже без остатка · потеря ≈ ${n(K.deficit_lost_units)} шт до прихода заказа`],
   ['risk:excess','layers','t-warn','Избыточный запас',`${n(K.excess_skus)}<small> SKU</small>`,`${n(K.excess_units)} шт сверх ${POL.excess_months} мес. спроса — не дозаказывать`],
   ['all','truck','t-acc','В пути (учтено)',`${n(K.transit_units)}<small> шт</small>`,`${n(K.transit_future_units)} в срок + ${n(K.transit_late_counted_units)} опаздывают; ${n(K.transit_stale_units)} шт в зависших PO не учтены`],
   ['review:low','tag','t-ser','Пересмотр цены',`${n(K.low_markup_skus)}<small> SKU</small>`,`наценка ниже ${ECO.min_markup_pct}% — не в автозакупку; ещё ${n(K.no_cost_skus)} без себестоимости`],
@@ -658,7 +659,7 @@ $('#kpis').onkeydown = e => { const k = e.target.closest('.kpi'); if(k && (e.key
 
 /* ===================== brief ===================== */
 $('#brief').innerHTML = P.brief_html;
-if(P.brief_src === 'ai'){ $('#aiBadge').innerHTML = ic('sparkles') + 'Claude'; $('#briefSrc').textContent = 'Пишет ИИ-агент по результатам расчёта; все числа сверены с расчётом автоматически.'; }
+if(P.brief_src === 'ai'){ $('#aiBadge').innerHTML = ic('sparkles') + 'Claude'; $('#briefSrc').textContent = P.brief_verified === false ? 'Пишет ИИ-агент по результатам расчёта; часть чисел в расчёте не найдена — см. пометку в конце сводки.' : 'Пишет ИИ-агент по результатам расчёта; числа, коды и даты сверены с расчётом автоматически.'; }
 else { $('#aiBadge').textContent = 'автосводка'; $('#briefSrc').textContent = 'Сводка по результатам расчёта.'; }
 
 /* ===================== loss list ===================== */
@@ -674,8 +675,8 @@ function drawLoss(){
 /* ===================== diff ===================== */
 (function(){
   const d = P.diff || {first_run:true};
-  if(d.first_run){ $('#diffHint').textContent = 'Сравнение появится со второго запуска'; $('#diff').innerHTML = '<p class="muted" style="margin:0;font-size:13px">Это первый запуск. Со следующего здесь будут новые позиции к заказу, изменившиеся объёмы и новые риски.</p>'; return; }
-  $('#diffHint').textContent = `С прошлым расчётом от ${dt(d.prev_generated_at.slice(0,10))} ${d.prev_generated_at.slice(11,16)} (данные на ${dt(d.prev_asof)})`;
+  if(d.first_run){ $('#diffHint').textContent = 'Сравнение появится со следующей выгрузкой'; $('#diff').innerHTML = '<p class="muted" style="margin:0;font-size:13px">Это первая выгрузка. Со следующей здесь будут новые позиции к заказу, изменившиеся объёмы и новые риски.</p>'; return; }
+  $('#diffHint').textContent = `С прошлой выгрузкой — данные на ${dt(d.prev_asof)}`;
   const cell = (k, arr, fmt) => { arr = arr || []; return `<div class="diff-cell"><div class="k">${k}</div><div class="v">${arr.length}</div>${arr.length?`<div class="x">${arr.slice(0,3).map(fmt).join(', ')}${arr.length>3?` и ещё ${arr.length-3}`:''}</div>`:''}</div>`; };
   const same = !['new_order_now','dropped_order_now','qty_changed','new_deficit','resolved_deficit'].some(k => (d[k]||[]).length);
   $('#diff').innerHTML = `<div class="diff-grid">
@@ -684,7 +685,7 @@ function drawLoss(){
     ${cell('Объём ±15%', d.qty_changed, x=>`${x.sku} ${n(x.was)}→${n(x.now)}`)}
     ${cell('Новые риски', d.new_deficit, x=>x.sku)}
     ${cell('Риск снят', d.resolved_deficit, x=>x.sku)}</div>
-    ${same?'<p class="muted" style="margin:10px 0 0;font-size:12.5px">Данные не менялись — план тот же.</p>':''}`;
+    ${same?'<p class="muted" style="margin:10px 0 0;font-size:12.5px">С прошлой выгрузки план не изменился.</p>':''}`;
 })();
 
 /* ===================== data quality ===================== */
@@ -970,18 +971,21 @@ function drawCal(){
 }
 function drawModel(){
   const S = P.season;
-  $('#season').innerHTML = CATS.filter(c=>S[c]).map(c=>{ const v = S[c]; const pk = v.indexOf(Math.max(...v)); return `<div class="mult"><div class="t"><span style="display:flex;gap:6px;align-items:center"><i class="dot" style="background:${catColor(c)}"></i>${CAT_RU[c]}</span><em>пик: ${MONTHS[pk]} ×${n1(v[pk])}</em></div><div class="cb"><canvas id="sz-${c}" role="img" aria-label="Сезонность: ${CAT_RU[c]}"></canvas></div></div>`; }).join('');
+  $('#season').innerHTML = CATS.filter(c=>S[c]).map(c=>{ const v = S[c]; const pk = v.indexOf(Math.max(...v)); return `<div class="mult"><div class="t"><span style="display:flex;gap:6px;align-items:center"><i class="dot" style="background:${catColor(c)}"></i>${CAT_RU[c]}</span><em>${v[pk] < 1.05 ? 'ровный спрос' : `пик: ${MONTHS[pk]} ×${n1(v[pk])}`}</em></div><div class="cb"><canvas id="sz-${c}" role="img" aria-label="Сезонность: ${CAT_RU[c]}"></canvas></div></div>`; }).join('');
   const ymax = Math.max(...CATS.filter(c=>S[c]).flatMap(c=>S[c])) * 1.05;
   CATS.filter(c=>S[c]).forEach(c => mk('sz-'+c, {type:'bar', data:{labels:MONTHS.map(m=>m[0].toUpperCase()), datasets:[{label:'Индекс', data:S[c], backgroundColor:catColor(c), borderRadius:2, maxBarThickness:14}]},
     options:chartBase({animation:false, scales:{x:{ticks:{font:{size:9.5}, autoSkip:false}}, y:{display:false, max:ymax}}, plugins:{tooltip:{callbacks:{title:i=>MONTHS_FULL[i[0].dataIndex], label:c=>` индекс ${n1(c.parsed.y)}`}}}})}));
   const B = P.backtest;
   if(!B){ $('#btHint').textContent = 'Бэктест не запускался.'; return; }
-  $('#btHint').innerHTML = `Модель обучена на данных до ${dt(B.period[0])} и сравнена с фактом за ${dt(B.period[0])} — ${dt(B.period[1])}. Месяцы, когда товар кончался (${n1(B.stockout_share)}% пар SKU×месяц), исключены: там продажи ≠ спрос. WAPE — суммарная ошибка в % от факта, меньше — лучше.`;
+  $('#btHint').innerHTML = `Модель обучена на данных до ${dt(B.period[0])} и сравнена с фактом за ${dt(B.period[0])} — ${dt(B.period[1])}. Месяцы, когда товар кончался или на складе лежали только остатки (${n1(B.stockout_share)}% пар SKU×месяц), исключены: там продажи ≠ спрос. WAPE — суммарная ошибка в % от факта, меньше — лучше.`;
+  const sg = x => (x > 0 ? '+' : '') + n1(x) + '%';
+  const org = (B.origins||[]).map(o => `<li>факт ${mLabel(o.period[0])} — ${mLabel(o.period[1])}: модель <b>${n1(o.wape_q_model)}%</b>, среднее за 12 мес. ${n1(o.wape_q_avg12)}%, год назад ${n1(o.wape_q_ly)}%; смещение модели ${sg(o.bias_model)}</li>`).join('');
   const rows = [['Все категории', B.total], ...Object.entries(B.by_category).map(([c,v])=>[CAT_RU[c]||c, v])];
   const cell = (v,k,w) => { const a = [v['wape'+k+'model'],v['wape'+k+'avg12'],v['wape'+k+'ly']].filter(x=>x!=null); const x = v['wape'+k+w]; return x!=null && x===Math.min(...a) ? `<span class="best">${n1(x)}%</span>` : (x==null?'—':n1(x)+'%'); };
   $('#btTbl').innerHTML = `<div class="tbl-wrap bt-tbl" style="max-height:none;box-shadow:none"><table><thead><tr><th rowspan="2">Категория</th><th colspan="3" style="text-align:center">По месяцам</th><th colspan="3" style="text-align:center">По кварталам</th></tr><tr><th class="num" style="top:34px">Модель</th><th class="num" style="top:34px">Ср. 12</th><th class="num" style="top:34px">Год назад</th><th class="num" style="top:34px">Модель</th><th class="num" style="top:34px">Ср. 12</th><th class="num" style="top:34px">Год назад</th></tr></thead><tbody>${
     rows.map(([l,v],i)=>`<tr><td>${i===0?`<b>${l}</b>`:l}</td><td class="num">${cell(v,'_','model')}</td><td class="num">${cell(v,'_','avg12')}</td><td class="num">${cell(v,'_','ly')}</td><td class="num">${cell(v,'_q_','model')}</td><td class="num">${cell(v,'_q_','avg12')}</td><td class="num">${cell(v,'_q_','ly')}</td></tr>`).join('')}</tbody></table></div>
-    <p class="muted" style="font-size:12px;margin:8px 0 0">Зелёным — лучший способ в строке. «Ср. 12» — среднее за 12 месяцев, как часто планируют вручную; «Год назад» — продажи того же месяца прошлого года.</p>`;
+    <p class="muted" style="font-size:12px;margin:8px 0 0">Зелёным — лучший способ в строке. «Ср. 12» — среднее за 12 месяцев, как часто планируют вручную; «Год назад» — продажи того же месяца прошлого года.</p>
+    ${org ? `<p class="muted" style="font-size:12px;margin:10px 0 0">Устойчивость: тот же расчёт от разных точек отсчёта, WAPE по кварталам. Смещение больше нуля — прогноз в сумме выше факта.</p><ul class="muted" style="font-size:12px;margin:4px 0 0;padding-left:18px">${org}</ul>` : ''}`;
   legend($('#btLegend'), [[css('--text'),'Факт','line'],[css('--accent'),'Модель','line'],[css('--muted'),'Среднее за 12 мес','dash']]);
   mk('btChart', {type:'line', data:{labels:B.monthly.map(m=>mLabel(m.month)), datasets:[
     {label:'Факт', data:B.monthly.map(m=>m.actual), borderColor:css('--text'), backgroundColor:css('--text'), borderWidth:2, pointRadius:2.5, tension:.25},
@@ -1097,11 +1101,11 @@ function drawSku(r){
   const p = M.params;
   $('#method').innerHTML = `
   <p><b>1. Спрос, а не продажи.</b> Для каждого месяца проверяем, был ли товар в наличии: остаток на 1-е + приходы − продажи. Если к концу месяца продано почти всё доступное, месяц «урезан дефицитом» и в оценку спроса не идёт. Разовые оптовые отгрузки выше ${p.forecast.outlier_k}× ожидаемого срезаются.</p>
-  <p><b>2. Прогноз = уровень × сезонность.</b> Сезонный профиль — по полным годам истории категории, уточнённый историей SKU. Уровень — взвешенное среднее за ${p.forecast.history_months} мес. (свежие месяцы весят больше, полупериод ${p.forecast.half_life_months} мес.).</p>
+  <p><b>2. Прогноз = уровень × сезонность.</b> Сезонный профиль — по полным годам истории категории, уточнённый историей SKU; у категорий без выраженного сезона (пик индекса ниже ×${p.forecast.flat_season_below}) спрос считается ровным. Уровень — взвешенное среднее за ${p.forecast.history_months} мес. (свежие месяцы весят больше, полупериод ${p.forecast.half_life_months} мес.).</p>
   <p><b>3. Проекция остатков по дням</b> на ${Math.round(p.policy.horizon_days/30)} мес.: остаток сейчас (снимок на 1-е − продажи + приходы) плюс открытые заказы на даты прихода. Просроченные PO до ${p.policy.overdue_trust_days} дн. считаем едущими, старше — не учитываем и показываем к проверке.</p>
   <p><b>4. Когда заказывать:</b> день, когда остаток опустится ниже страхового запаса, минус плечо поставки (медиана плановых сроков PO поставщика → история SKU → норматив; + до ${p.lead_time.buffer_days} дн. на задержку, итого не более ${p.lead_time.max_days} дн.). Если эта дата ближе ${p.policy.order_now_window_days} дн. — «заказать сейчас». Сезонный товар не заказывается с приходом в мёртвый сезон.</p>
-  <p><b>5. Сколько:</b> прогноз спроса на ${p.policy.review_days} дн. после прихода + страховой запас − ожидаемый остаток на дату прихода − что ещё приедет; округление до кратности партии из истории заказов. Страховой запас: z(сервис A ${Math.round(p.policy.service_level_A*100)}% / B ${Math.round(p.policy.service_level_B*100)}% / C ${Math.round(p.policy.service_level_C*100)}%) × σ × √плечо, по сезону ×0,1–2, не более ${p.policy.max_safety_months} мес. спроса.</p>
-  <p><b>6. Отсечения:</b> наценка ниже ${p.economics.min_markup_pct}% — на пересмотр цены, не в закупку; нет себестоимости в ERP — в плане с пометкой «проверить наценку»; нет продаж ${p.economics.dead_months}+ мес. — мёртвый ассортимент; запас больше ${p.policy.excess_months} мес. — избыток.</p>
+  <p><b>5. Сколько:</b> прогноз спроса на ${p.policy.review_days} дн. после прихода + страховой запас − ожидаемый остаток на дату прихода − что ещё приедет; округление вверх до кратности партии из истории заказов (если партия больше спроса за ${p.policy.excess_months} мес., объём не округляется и позиция помечается «согласовать партию»). Класс ABC — по обороту внутри своей категории. Страховой запас: z(сервис A ${Math.round(p.policy.service_level_A*100)}% / B ${Math.round(p.policy.service_level_B*100)}% / C ${Math.round(p.policy.service_level_C*100)}%) × σ × √плечо, по сезону ×0,1–2, не более ${p.policy.max_safety_months} мес. спроса.</p>
+  <p><b>6. Отсечения:</b> наценка ниже ${p.economics.min_markup_pct}% — на пересмотр цены, не в закупку и не в риски дефицита; нет себестоимости в ERP — в плане с пометкой «проверить наценку»; нет продаж ${p.economics.dead_months}+ мес. — мёртвый ассортимент; запас больше ${p.policy.excess_months} мес. — избыток.</p>
   <p class="muted" style="font-size:12.5px">Все параметры — в <code>config.toml</code>. Расчёт детерминированный (Python); ИИ-агент (Claude Code) запускает его, проверяет результат, находит аномалии в данных и пишет сводку.</p>`;
 })();
 

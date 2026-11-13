@@ -60,11 +60,18 @@ def run(ds: Dataset, cfg: dict) -> dict:
 
     # --- ABC по прокси оборота (штуки × ценовой дециль), XYZ по вариативности
     units12 = full[full["mi"] >= cutoff - 12].groupby("sku_id")["y"].sum()
+    # мёртвый ассортимент: нет продаж за economics.dead_months полных месяцев и в текущем неполном
+    units_dead = full[full["mi"] >= cutoff - eco["dead_months"]].groupby("sku_id")["y"].sum()
     dim = ds.sku.set_index("sku_id")
-    proxy = (units12 * dim["price_decile"].reindex(units12.index).fillna(5)).sort_values(ascending=False)
+    # дециль цены задан внутри категории, между категориями он несравним — поэтому и ABC считаем внутри категории
+    proxy = units12 * dim["price_decile"].reindex(units12.index).fillna(5)
     proxy = proxy[proxy > 0]
-    cum = proxy.cumsum() / proxy.sum() if proxy.sum() else proxy
-    abc = {k: ("A" if v <= 0.8 else "B" if v <= 0.95 else "C") for k, v in cum.items()}
+    a_share, b_share = pol.get("abc_a_share", 0.8), pol.get("abc_b_share", 0.95)
+    abc = {}
+    for _, grp in proxy.groupby(dim["category"].reindex(proxy.index)):
+        grp = grp.sort_values(ascending=False)
+        before = (grp.cumsum() - grp) / grp.sum()      # доля оборота, набранная до этой позиции: лидер всегда A
+        abc.update({k: ("A" if v < a_share else "B" if v < b_share else "C") for k, v in before.items()})
 
     hist_from = cutoff - 24
     month_labels_hist = [mi_str(m) for m in range(hist_from, cutoff + 1)]
@@ -103,7 +110,7 @@ def run(ds: Dataset, cfg: dict) -> dict:
         first_mi = int(g["mi"].min()) if len(g) else None
         age = (cutoff - first_mi) if first_mi is not None else 0
 
-        dead = u12 == 0 and partial == 0
+        dead = float(units_dead.get(sku, 0.0)) == 0 and partial == 0
         cls = abc.get(sku, "C")
         p = plan_sku(cal=cal, fc=fc, stock0=s0, transit=transit, L=L, abc=cls, pack=pack, cfg=cfg)
 
@@ -134,6 +141,16 @@ def run(ds: Dataset, cfg: dict) -> dict:
 
         orders = p["orders"]
         first = orders[0] if orders else None
+        if first and not dead and not low_markup and pack > 1:
+            need_txt = max(int(round(first["need"])), 1)
+            if first["below_pack"]:
+                flags.append(f"потребность ≈ {need_txt} шт, а партия из истории заказов {pack} шт — больше годового спроса; "
+                             "объём до партии не округлён: согласовать меньшую партию или не заказывать")
+            elif first["qty"] >= 2 * max(first["need"], 1):
+                flags.append(f"потребность ≈ {need_txt} шт меньше партии {pack} шт — заказ округлён до партии; "
+                             "уточнить минимальную партию у поставщика")
+        # товар с низкой наценкой намеренно не закупаем: его окончание — не «риск дефицита», который надо срочно закрывать
+        deficit = None if dead or low_markup else p["deficit"]
         win = pol["order_now_window_days"]
         if dead:
             status = "dead"
@@ -178,9 +195,9 @@ def run(ds: Dataset, cfg: dict) -> dict:
             basis = (f"все {fc.months_used} мес. окна товара не было — спрос оценён по продажам снизу"
                      if fc.lower_bound else f"оценка по {fc.months_used} мес. с наличием"
                      + (f", {fc.months_censored} мес. дефицита исключены" if fc.months_censored else ""))
-            explain.append(
-                f"Спрос ≈ {fc.level:.1f} шт в средний месяц; сезонный пик — {MONTHS_RU[peak]} "
-                f"(×{idx[peak]:.1f}); {basis}.")
+            season_txt = ("спрос ровный, без сезонности" if float(np.max(idx)) < 1.05
+                          else f"сезонный пик — {MONTHS_RU[peak]} (×{idx[peak]:.1f})")
+            explain.append(f"Спрос ≈ {fc.level:.1f} шт в средний месяц; {season_txt}; {basis}.")
             explain.append(f"Остаток сейчас ≈ {int(s0)} шт; в пути {int(sum(t['qty'] for t in transit if t['counted']))} шт.")
             explain.append(
                 "Запасов хватит до " + (cal.date(cover).strftime("%d.%m.%Y") if cover is not None else "конца горизонта")
@@ -194,8 +211,11 @@ def run(ds: Dataset, cfg: dict) -> dict:
                     f"Заказ {cal.date(first['order_day']).strftime('%d.%m.%Y')} придёт ≈ {cal.date(a).strftime('%d.%m.%Y')}; "
                     f"спрос на {pol['review_days']} дн. после прихода ≈ {p['demand'][a:a + pol['review_days']].sum():.0f} шт "
                     f"+ страховой − ожидаемый остаток → {first['qty']} шт (с округлением до кратности партии).")
-            if p["deficit"]:
-                dd = p["deficit"]
+            if low_markup and cover is not None:
+                explain.append(f"Запас закончится {cal.date(cover).strftime('%d.%m.%Y')}; закупка не планируется, "
+                               "пока не пересмотрена цена, поэтому в риски дефицита позиция не входит.")
+            if deficit:
+                dd = deficit
                 explain.append(
                     f"Риск: товар закончится {cal.date(dd['stockout_day']).strftime('%d.%m.%Y')}, новый заказ успеет только "
                     f"≈ {cal.date(dd['stockout_day'] + dd['gap_days']).strftime('%d.%m.%Y')} — потеря ≈ {dd['lost_units']} шт. "
@@ -222,12 +242,13 @@ def run(ds: Dataset, cfg: dict) -> dict:
             "demand_next_lr": _r(p["demand"][: L + pol["review_days"]].sum()),
             "orders": [{
                 "order_date": cal.date(o["order_day"]).isoformat(), "arrival_date": cal.date(o["arrival_day"]).isoformat(),
-                "order_day": o["order_day"], "qty": o["qty"], "weight_kg": _r(o["qty"] * w, 1) if w else None,
+                "order_day": o["order_day"], "qty": o["qty"], "need": _r(o["need"]), "below_pack": o["below_pack"],
+                "weight_kg": _r(o["qty"] * w, 1) if w else None,
             } for o in orders],
             "order_now_qty": first["qty"] if status in ("order_now",) else 0,
             "next_order_date": cal.date(first["order_day"]).isoformat() if first else None,
-            "deficit": ({**p["deficit"], "stockout_date": cal.date(p["deficit"]["stockout_day"]).isoformat()}
-                        if p["deficit"] and not dead else None),
+            "deficit": ({**deficit, "stockout_date": cal.date(deficit["stockout_day"]).isoformat()}
+                        if deficit else None),
             "excess": ({**p["excess"], "months": _r(p["on_hand_all"] / max(fc.level, 1e-9), 1) if fc.level else None}
                        if p["excess"] else ({"excess_units": _r(p["on_hand_all"]), "months": None} if dead and p["on_hand_all"] > 0 else None)),
             "lost_units_12m_plan": _r(p["lost_plan"]),
@@ -285,6 +306,8 @@ def run(ds: Dataset, cfg: dict) -> dict:
         "ok_skus": sum(1 for r in plan_rows if r["status"] == "ok"),
         "deficit_critical": sum(1 for r in deficit if r["deficit"]["severity"] == "critical"),
         "deficit_high": sum(1 for r in deficit if r["deficit"]["severity"] == "high"),
+        "deficit_skus": len(deficit),
+        "deficit_out_now": sum(1 for r in deficit if r["deficit"]["stockout_day"] == 0),   # уже без остатка
         "deficit_lost_units": sum(r["deficit"]["lost_units"] for r in deficit),
         "excess_skus": sum(1 for r in excess if r["status"] != "dead"),
         "excess_units": sum(r["excess"]["excess_units"] for r in excess if r["status"] != "dead"),
@@ -324,13 +347,25 @@ def run(ds: Dataset, cfg: dict) -> dict:
          "note": "Товар кончался — продажи там занижены, такие месяцы исключены из оценки спроса."},
     ]
 
+    # --- свежесть выгрузки: «заказать сейчас» считается на дату среза, а не на сегодня
+    stale_after = cfg["data"].get("stale_days", 0)
+    stale = bool(stale_after) and ds.age_days > stale_after
+    warnings = list(ds.warnings)
+    if stale:
+        warnings.insert(0, f"Выгрузке {ds.age_days} дн.: план рассчитан на {asof:%d.%m.%Y}, а не на сегодня. "
+                           "Даты заказов и остатки устарели — нужна свежая выгрузка ERP.")
+        dq.insert(0, {"title": "Выгрузка устарела", "value": f"{ds.age_days} дн.",
+                      "note": f"План рассчитан на {asof:%d.%m.%Y}. Продажи, приходы и заказы после этой даты не учтены; "
+                              f"порог свежести — {stale_after} дн. (config.toml, data.stale_days)."})
+
     return {
         "data_quality": dq,
         "meta": {
             "asof": asof.isoformat(), "source": ds.source, "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "data_age_days": ds.age_days, "stale": stale, "warnings": warnings,
             "current_month": mi_str(cutoff), "snapshot_month": mi_str(snap_mi),
             "hist_labels": month_labels_hist, "fut_labels": [mi_str(m) for m in fut_months],
-            "params": {k: cfg[k] for k in ("economics", "lead_time", "policy", "forecast")},
+            "params": {k: cfg[k] for k in ("economics", "lead_time", "policy", "forecast", "backtest") if k in cfg},
         },
         "kpi": kpi, "skus": rows, "suppliers_now": suppliers, "calendar": calendar_rows,
         "season": {c: [round(float(x), 2) for x in v] for c, v in season.category.items()},

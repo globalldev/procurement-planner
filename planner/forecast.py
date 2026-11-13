@@ -45,11 +45,18 @@ class Seasonality:
 
 def seasonality(sales: pd.DataFrame, cutoff: int, cfg: dict) -> Seasonality:
     cat_idx: dict[str, np.ndarray] = {}
+    flat: set[str] = set()
+    flat_below = cfg.get("flat_season_below", 0.0)
     cat = sales.groupby(["category", "mi"], as_index=False)["y"].sum()
     for c, g in cat.groupby("category"):
         shapes = _year_shapes(g, cutoff, min_total=12)
         idx = np.mean(shapes, axis=0) if shapes else np.ones(12)
-        cat_idx[c] = idx / idx.mean()
+        idx = idx / idx.mean()
+        if idx.max() < flat_below:
+            # у категории нет выраженного сезона: колебания индекса — шум, прогноз по ним хуже ровного (проверено бэктестом)
+            idx = np.ones(12)
+            flat.add(c)
+        cat_idx[c] = idx
 
     shrink = cfg["seasonal_shrink_years"]
     min_years = cfg["min_sku_years_for_own_season"]
@@ -59,7 +66,9 @@ def seasonality(sales: pd.DataFrame, cutoff: int, cfg: dict) -> Seasonality:
         shapes = _year_shapes(g, cutoff, min_total=24)
         n = len(shapes)
         sku_years[sku] = n
-        if n >= min_years:
+        if c in flat:
+            sku_idx[sku] = cat_idx[c]
+        elif n >= min_years:
             own = np.mean(shapes, axis=0)
             blend = (n * own + shrink * cat_idx[c]) / (n + shrink)
             sku_idx[sku] = blend / blend.mean()
@@ -68,12 +77,17 @@ def seasonality(sales: pd.DataFrame, cutoff: int, cfg: dict) -> Seasonality:
     return Seasonality(cat_idx, sku_idx, sku_years)
 
 
-def censored_months(stock: pd.DataFrame, sales: pd.DataFrame, receipts: pd.DataFrame | None = None) -> set[tuple[str, int]]:
+def censored_months(stock: pd.DataFrame, sales: pd.DataFrame, receipts: pd.DataFrame | None = None,
+                    usual: dict[tuple[str, int], float] | None = None, min_share: float = 0.0) -> set[tuple[str, int]]:
     """Месяцы, когда товар закончился: продажи в них — нижняя граница спроса, а не спрос.
 
     Доступно за месяц = остаток на 1-е (нет снимка = 0) + приходы за месяц.
     Если к концу месяца почти ничего не осталось — месяц «урезан дефицитом».
     Снимки остатков есть только с первого месяца в stock_monthly; раньше не судим.
+
+    usual + min_share — только для проверки прогноза на истории: usual[(sku, месяц)] — обычный спрос этого месяца;
+    если доступно было меньше min_share от него, месяц тоже дефицитный (на складе лежали единицы при спросе в сотни,
+    спрос ими не измерить). В оценку спроса это правило не идёт: у медленных товаров оно выбрасывает честные месяцы.
     """
     if stock.empty:
         return set()
@@ -89,6 +103,8 @@ def censored_months(stock: pd.DataFrame, sales: pd.DataFrame, receipts: pd.DataF
         avail = st.get((sku, m), 0) + rc.get((sku, m), 0)
         # товара не было вовсе или к концу месяца продано ≥95% доступного
         if avail <= 0 or avail - y <= 0.05 * avail:
+            out.add((sku, m))
+        elif min_share and usual is not None and avail < min_share * usual.get((sku, m), 0.0):
             out.add((sku, m))
     return out
 

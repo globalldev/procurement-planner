@@ -7,7 +7,7 @@
 4. проекция остатка вперёд (продажи не уходят в минус: нет товара — потерянный спрос);
 5. дата заказа = день, когда остаток упадёт ниже страхового запаса, минус плечо;
 6. объём = спрос на [приход, приход + цикл] + страховой − ожидаемый остаток на приход − что ещё приедет
-   в этот промежуток; округление вверх до кратности партии из истории заказов.
+   в этот промежуток (включая день прихода); округление вверх до кратности партии из истории заказов.
 Шаги 5–6 повторяются, пока на 12 месяцев вперёд не построен календарь заказов.
 """
 from __future__ import annotations
@@ -174,21 +174,32 @@ def plan_sku(
                 continue
             need = demand[a:end].sum() + ss_day[end - 1]
             on_arrival = inv[a - 1] if a > 0 else stock0
-            later = arr[a + 1:end].sum()
+            later = arr[a:end].sum()   # всё, что ещё приедет с дня прихода включительно: inv[a-1] приход дня a не содержит
             q = need - on_arrival - later
             if q <= 0.5:
                 # ниже страхового только кратковременно — сдвигаем точку поиска
                 skip_to = t_star + 1
                 continue
-            step = effective_pack(pack, q)
-            q = int(np.ceil(q / step) * step)
+            raw = float(q)
+            # кратность партии поставщика соблюдаем строго; strict_pack = false — малую потребность до партии не раздуваем
+            strict = pol.get("strict_pack", True)
+            step = pack if strict else effective_pack(pack, q)
+            q = int(np.ceil(raw / step) * step)
+            # партия больше спроса за горизонт избытка (год): округление само создало бы избыток на годы.
+            # Такой заказ не раздуваем — показываем потребность и отдаём решение закупщику (below_pack).
+            below = bool(strict and pack > 1 and q > fc.level * pol["excess_months"])
+            if below:
+                step = effective_pack(pack, raw)
+                q = int(np.ceil(raw / step) * step)
             gap = pol.get("min_order_gap_days", 30)
             if orders and order_day - orders[-1]["order_day"] < gap:
                 # слишком частые заказы: докладываем в предыдущий
                 orders[-1]["qty"] += q
+                orders[-1]["need"] += raw
+                orders[-1]["below_pack"] = orders[-1]["below_pack"] or below
                 arr[orders[-1]["arrival_day"]] += q
             else:
-                orders.append({"order_day": int(order_day), "arrival_day": int(a), "qty": q})
+                orders.append({"order_day": int(order_day), "arrival_day": int(a), "qty": q, "need": raw, "below_pack": below})
                 arr[a] += q
             inv, _ = project(stock0, demand, arr)
 

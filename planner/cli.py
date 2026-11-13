@@ -24,11 +24,15 @@ def cmd_run(args) -> int:
     if new:
         print(f"[data] принята новая выгрузка: {new}")
     ds = data.load(data_dir, args.asof or cfg["data"]["asof"])
-    print(f"[data] срез {ds.asof}, источник {ds.source}")
+    print(f"[data] срез {ds.asof}, источник {ds.source}, выгрузке {ds.age_days} дн.")
     result = engine.run(ds, cfg)
+    for w in result["meta"]["warnings"]:
+        print(f"[warn] {w}")
     cutoff = ds.asof.year * 12 + ds.asof.month - 1
     if not args.no_backtest:
-        result["backtest"] = backtest.run(ds.sales, ds.stock, ds.receipts, cutoff, cfg)
+        bt = backtest.run(ds.sales, ds.stock, ds.receipts, cutoff, cfg)
+        if bt:
+            result["backtest"] = bt
     paths = report.write_all(result, ROOT, cfg)
     k = result["kpi"]
     print(f"[plan] заказать сейчас: {k['order_now_skus']} SKU / {k['order_now_units']} шт; "
@@ -52,9 +56,10 @@ def cmd_publish(args) -> int:
     from . import publish
 
     cfg = load_cfg(args.config)
-    print(f"[publish] {publish.publish(ROOT, cfg)}")
-    print(f"[notify] {publish.notify(ROOT, cfg)}")
-    return 0
+    ok, msg = publish.publish(ROOT, cfg)
+    print(f"[publish] {msg}")
+    print(f"[notify] {publish.notify(ROOT, cfg, publish_error='' if ok else msg)}")
+    return 0 if ok else 1
 
 
 def cmd_all(args) -> int:
@@ -75,6 +80,7 @@ def cmd_sku(args) -> int:
 
 def main(argv=None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(prog="planner")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="пересчитать план закупок и собрать дашборд")
@@ -97,4 +103,11 @@ def main(argv=None) -> int:
     s.add_argument("sku")
     s.set_defaults(fn=cmd_sku)
     a = ap.parse_args(argv)
-    return a.fn(a)
+    from .data import DataError
+
+    try:
+        return a.fn(a)
+    except DataError as e:
+        # по негодной выгрузке план не считаем и не публикуем: лучше вчерашний дашборд, чем неверный
+        print(f"[error] {e}", file=sys.stderr)
+        return 2

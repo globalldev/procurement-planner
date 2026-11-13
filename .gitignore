@@ -4,3 +4,4 @@ data/
 !data/README.md
 .env
 _video/
+.pytest_cache/

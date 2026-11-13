@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -40,17 +39,39 @@ def _snapshot(result: dict) -> dict:
     }
 
 
+def baseline(hist: Path, asof: str) -> dict | None:
+    """С чем сравнивать: последний расчёт по предыдущей выгрузке (с более ранней датой среза).
+
+    Повторный запуск на тех же данных базу не меняет — иначе блок «Что изменилось» обнулялся бы после любого перезапуска.
+    """
+    best = None
+    for f in hist.glob("*.json"):
+        try:
+            s = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        key = (s.get("asof", ""), s.get("generated_at", ""))
+        if "skus" in s and key[0] and key[0] < asof and (best is None or key > (best["asof"], best.get("generated_at", ""))):
+            best = s
+    return best
+
+
 def diff(prev: dict | None, cur: dict) -> dict:
     if not prev:
         return {"first_run": True}
     p, c = prev["skus"], cur["skus"]
     out = {"first_run": False, "prev_generated_at": prev["generated_at"], "prev_asof": prev["asof"],
            "new_order_now": [], "dropped_order_now": [], "qty_changed": [], "new_deficit": [], "resolved_deficit": [],
-           "kpi_delta": {k: cur["kpi"][k] - prev["kpi"].get(k, 0) for k in cur["kpi"]
-                         if isinstance(cur["kpi"][k], (int, float)) and cur["kpi"][k] != prev["kpi"].get(k, 0)}}
+           "kpi_delta": {k: cur["kpi"][k] - prev["kpi"][k] for k in cur["kpi"]
+                         if k in prev["kpi"] and isinstance(cur["kpi"][k], (int, float)) and cur["kpi"][k] != prev["kpi"][k]}}
     for sku, r in c.items():
         o = p.get(sku)
         if not o:
+            # товара не было в прошлой выгрузке
+            if r["status"] == "order_now":
+                out["new_order_now"].append({"sku": sku, "qty": r["qty"], "was": "нет в прошлой выгрузке"})
+            if r["deficit"]:
+                out["new_deficit"].append({"sku": sku, "severity": r["deficit"]})
             continue
         if r["status"] == "order_now" and o["status"] != "order_now":
             out["new_order_now"].append({"sku": sku, "qty": r["qty"], "was": STATUS_RU.get(o["status"], o["status"])})
@@ -136,6 +157,7 @@ def ai_summary(result: dict, d: dict) -> dict:
         "backtest": {k: result.get("backtest", {}).get(k) for k in ("period", "total", "stockout_share")},
         "overdue_po": [{"sku": r["sku"], **t} for r in rows for t in r["transit"] if t["overdue_days"] > 0],
         "data_quality": result.get("data_quality", []),
+        "warnings": result["meta"].get("warnings", []),
         "changes": d,
     }
 
@@ -159,10 +181,14 @@ def fallback_brief(result: dict, d: dict) -> str:
     ]
     if k["overdue_po"]:
         lines.append(f"Просроченных открытых PO: {k['overdue_po']} — проверить статус у поставщиков.")
-    if not d.get("first_run"):
-        lines.append(f"С прошлого запуска: +{len(d['new_order_now'])} в «заказать сейчас», "
+    if d.get("first_run"):
+        lines.append("Это первая выгрузка — сравнение появится со следующей.")
+    else:
+        lines.append(f"С прошлой выгрузки ({d['prev_asof']}): +{len(d['new_order_now'])} в «заказать сейчас», "
                      f"−{len(d['dropped_order_now'])} ушли, {len(d['qty_changed'])} с изменением объёма, "
                      f"{len(d['new_deficit'])} новых рисков дефицита.")
+    for w in m.get("warnings", []):
+        lines.insert(0, f"**Внимание.** {w}")
     return "\n\n".join(lines)
 
 
@@ -170,14 +196,12 @@ def write_all(result: dict, root: Path, cfg: dict) -> dict:
     out = root / "out"
     hist = out / "history"
     hist.mkdir(parents=True, exist_ok=True)
-    snaps = sorted(hist.glob("*.json"))
-    prev = json.loads(snaps[-1].read_text(encoding="utf-8")) if snaps else None
     snap = _snapshot(result)
-    d = diff(prev, snap)
+    d = diff(baseline(hist, snap["asof"]), snap)
     result["diff"] = d
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    (hist / f"{stamp}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+    # один снимок на выгрузку: повторный расчёт по тем же данным перезаписывает свой снимок
+    (hist / f"{snap['asof']}.json").write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
     result = clean(result)
     (out / "plan.json").write_text(json.dumps(result, ensure_ascii=False, default=str, allow_nan=False), encoding="utf-8")
     (out / "ai_context.json").write_text(json.dumps(clean(ai_summary(result, d)), ensure_ascii=False, indent=1,

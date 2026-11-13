@@ -48,6 +48,7 @@ def build(root: Path) -> Path:
         m = re.match(r"<!-- for: (.+?) -->\n", txt)
         if m and m[1] == gen:
             brief, brief_src = txt[m.end():], "ai"
+    plan["brief_verified"] = "<!-- unverified -->" not in brief
     plan["brief_html"] = _md(brief)
     plan["brief_src"] = brief_src
 
